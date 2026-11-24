@@ -263,3 +263,5 @@ tr.inactive td { opacity: .55; }
 .toc a:hover { background: var(--surface-2); }
 .gtable th { width: 28%; text-transform: none; letter-spacing: 0; font-size: .88rem; color: var(--text); vertical-align: top; white-space: normal; }
 .gtable td { white-space: normal; color: var(--text-2); }
+
+.seuil { font-size: 1.05rem; }

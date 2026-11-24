@@ -267,6 +267,25 @@ const fmtK = (v) => {
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const cls = (v) => (v < 0 ? "neg" : "");
 
+// Prix de vente minimum pour couvrir le coût d'achat + toutes les charges du mois
+function seuilRentable(r) {
+  const charges = r.fixes + r.stockage + r.transport + r.divers; // divers inclut pub et autres dépenses
+  const cm = r.cmupP["Agglomérés"];
+  let vol = r.venLots, base = "lots vendus ce mois";
+  if (!vol) { vol = r.demande; base = "demande saisie"; }
+  if (!vol) { vol = r.dispoP["Agglomérés"]; base = "si tout le stock disponible est vendu"; }
+  const prix = (v) => (v > 0 ? cm + charges / v : Infinity);
+  return { charges, cm, vol, base, prix: prix(vol), at: prix };
+}
+function seuilHtml(r, compact) {
+  const s = seuilRentable(r);
+  if (!Number.isFinite(s.prix)) return `<span class="muted">Prix rentable : pas de stock vendable ce mois.</span>`;
+  const ex = [2000, 5000, 10000].filter((v) => v !== s.vol).map((v) => `${fmtN(v)} lots → ${fmtP(s.at(v))}`).join(" · ");
+  return compact
+    ? `Prix minimum rentable : <b>${fmtP(s.prix)}</b>/lot <span class="muted">(${fmtN(s.vol)} lots, ${esc(s.base)})</span>`
+    : `<b>${fmtP(s.prix)}</b>/lot = coût d'achat ${fmtP(s.cm)} + charges ${fmtE(s.charges)} ÷ ${fmtN(s.vol)} lots <span class="muted">(${esc(s.base)})</span><br><span class="muted small">Autres volumes : ${ex}</span>`;
+}
+
 function priceBadge(seg, prod, prix) {
   const r = range(seg, prod);
   if (!r || !n0(prix)) return "";
@@ -451,7 +470,8 @@ function renderMois(c) {
             <h3>${SEG_LABEL[s]}</h3>
             <label class="field">Prix Agglomérés (€/lot)<input type="number" step="0.5" data-mk="${s}" data-mkk="prix" data-m="${i}" value="${esc(mk.prix)}"></label>
             <div class="small" style="margin:4px 0 8px">${n0(mk.prix) ? priceBadge(s, "Agglomérés", n0(mk.prix)) : `<span class="muted">Fourchette ${rg[0]}–${rg[1]} €</span>`}
-              ${marge !== null ? ` · marge <b class="${cls(marge)}">${fmtP(marge)}</b>/lot` : ""}</div>
+              ${marge !== null ? ` · marge <b class="${cls(marge)}">${fmtP(marge)}</b>/lot` : ""}
+              ${n0(mk.prix) && Number.isFinite(seuilRentable(r).prix) ? (clampPrix(s, "Agglomérés", mk.prix) >= seuilRentable(r).prix ? ` · <span class="badge good">rentable</span>` : ` · <span class="badge warn">sous le seuil (${fmtP(seuilRentable(r).prix)})</span>`) : ""}</div>
             <label class="field">Délai de paiement<select data-mk="${s}" data-mkk="delai" data-m="${i}">${opts(delaiList, mk.delai)}</select></label>
           </div>`;
         }).join("")}
@@ -462,6 +482,7 @@ function renderMois(c) {
         </div>
       </div>
       <p class="muted small">Coût moyen des agglomérés ce mois-ci : <b>${fmtP(cmA)}</b>/lot${c.rows[i + 1] && Math.abs(c.rows[i + 1].cmupP["Agglomérés"] - cmA) > 0.005 && c.rows[i + 1].dispoP["Agglomérés"] > 0 ? ` → <b>${fmtP(c.rows[i + 1].cmupP["Agglomérés"])}</b> en ${esc(c.rows[i + 1].nom)} après réception des achats` : ""}. Les prix et délais fixés ici servent de valeurs par défaut pour les ventes du mois.</p>
+      <div class="alert info"><span class="ico">€</span><span>${seuilHtml(r, true)}. Vendre en dessous de ce prix moyen fait perdre de l'argent ce mois-ci (coût d'achat + salaires + structure + stockage + pub + transport + autres dépenses).</span></div>
     </div>
 
     <h2 class="section-gap phase nego">Phase de négociation</h2>
@@ -572,11 +593,16 @@ function renderStock(c) {
   el.innerHTML = `
     <div class="grid k4">
       <div class="card kpi"><div class="label">Stock fin ${esc(cur.nom)}</div><div class="value">${fmtN(cur.lotsFin)} lots</div><div class="hint">+ ${fmtN(cur.transit)} en transit</div></div>
-      <div class="card kpi"><div class="label">Coût moyen agglomérés</div><div class="value">${fmtP(cur.cmup)}</div><div class="hint">${(() => { const nx = c.rows[state.currentMonth + 1]; return nx && nx.dispoP["Agglomérés"] > 0 && Math.abs(nx.cmupP["Agglomérés"] - cur.cmup) > 0.005 ? `→ ${fmtP(nx.cmupP["Agglomérés"])} en ${esc(nx.nom)} après réception · ` : ""; })()}marché ≈ ${fmtP(n0(state.params.prixMarche))}</div></div>
+      <div class="card kpi"><div class="label">Coût moyen agglomérés</div><div class="value">${fmtP(cur.cmup)}</div><div class="hint">${(() => { const nx = c.rows[state.currentMonth + 1]; return nx && nx.dispoP["Agglomérés"] > 0 && Math.abs(nx.cmupP["Agglomérés"] - cur.cmup) > 0.005 ? `→ ${fmtP(nx.cmupP["Agglomérés"])} en ${esc(nx.nom)} après réception · ` : ""; })()}marché ≈ ${fmtP(n0(state.params.prixMarche))}<br>Vente rentable dès <b>${fmtP(seuilRentable(cur).prix)}</b>/lot</div></div>
       <div class="card kpi"><div class="label">Couverture</div><div class="value">${Number.isFinite(couverture) ? couverture.toLocaleString("fr-FR", { maximumFractionDigits: 1 }) + " mois" : "—"}</div><div class="hint">au rythme moyen de ${fmtN(avgVentes)} lots/mois vendus</div></div>
       <div class="card kpi"><div class="label">Coût de stockage du mois</div><div class="value">${fmtE(cur.stockage)}</div><div class="hint">${state.params.stockageRate} % de la valeur du stock</div></div>
     </div>
     <div class="card section-gap">
+      <h2>Prix de vente minimum rentable · ${esc(cur.nom)}</h2>
+      <p class="seuil">${seuilHtml(cur, false)}</p>
+      <p class="muted small">C'est le prix moyen de vente par lot (agglomérés) en dessous duquel le mois est en perte : il couvre le coût d'achat des lots + salaires (${fmtE(n0(state.params.salaires))}) + structure (${fmtE(n0(state.params.structure))}) + stockage (${fmtE(cur.stockage)}) + publicité (${fmtE(cur.pub)}) + transport et autres (${fmtE(cur.transport + cur.divers - cur.pub)}). Plus vous vendez de lots, plus ce prix baisse.</p>
+    </div>
+    <div class="card">
       <h2>Stock par produit · fin ${esc(cur.nom)}</h2>
       <table><thead><tr><th>Produit</th><th class="r">Lots</th><th class="r">Coût moyen</th><th class="r">Valeur</th><th>Prix de vente possibles (Vignerons / Caves / Négociants)</th></tr></thead><tbody>
         ${PRODUITS.map((p) => `<tr><td>${p}</td><td class="r ${cls(cur.finP[p])}">${fmtN(cur.finP[p])}</td><td class="r">${cur.finP[p] ? fmtP(cur.cmupP[p]) : "—"}</td><td class="r">${fmtE(Math.max(0, cur.finP[p]) * cur.cmupP[p])}</td>
