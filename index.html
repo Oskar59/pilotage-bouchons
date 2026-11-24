@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Pilotage Bouchons</title>
   <meta name="description" content="Suivi de trésorerie, de stock et conseiller stratégique pour le jeu d'entreprise (distributeur de bouchons de liège).">
-  <link rel="stylesheet" href="style.css?v=1.6">
+  <link rel="stylesheet" href="style.css?v=1.7">
 </head>
 <body>
   <header class="topbar">
@@ -28,6 +28,7 @@
     <button class="tab active" data-tab="dashboard">Tableau de bord</button>
     <button class="tab" data-tab="mois">Saisie du mois</button>
     <button class="tab" data-tab="stock">Stock</button>
+    <button class="tab" data-tab="revient">Coût de revient</button>
     <button class="tab" data-tab="simu">Simulateur d'offre</button>
     <button class="tab" data-tab="ia">Conseiller IA</button>
     <button class="tab" data-tab="params">Paramètres &amp; partage</button>
@@ -38,6 +39,7 @@
     <section id="tab-dashboard" class="panel active"></section>
     <section id="tab-mois" class="panel"></section>
     <section id="tab-stock" class="panel"></section>
+    <section id="tab-revient" class="panel"></section>
     <section id="tab-simu" class="panel"></section>
     <section id="tab-ia" class="panel"></section>
     <section id="tab-params" class="panel"></section>
@@ -51,6 +53,7 @@
           <a href="#g-dashboard">Tableau de bord</a>
           <a href="#g-mois">Saisie du mois</a>
           <a href="#g-stock">Stock</a>
+          <a href="#g-revient">Coût de revient</a>
           <a href="#g-simu">Simulateur d'offre</a>
           <a href="#g-ia">Conseiller IA</a>
           <a href="#g-params">Paramètres &amp; partage</a>
@@ -160,6 +163,24 @@
         </tbody></table>
       </div>
 
+      <div class="card" id="g-revient">
+        <h2>Coût de revient</h2>
+        <p>Cet onglet applique la <b>méthode des coûts complets</b> du support de contrôle de gestion. Il sert à fixer vos prix de vente pour atteindre une marge donnée, et à voir quel produit et quel marché rapportent le plus.</p>
+        <div class="formula">Coût de revient = (Coûts de production + Coûts hors production) ÷ Quantité vendue</div>
+        <table class="gtable"><tbody>
+          <tr><th>Mois analysé</th><td>Par défaut, le dernier mois (jusqu'au mois en cours) où il y a des ventes : le support travaille toujours sur le cycle précédent. Vous pouvez choisir un autre mois.</td></tr>
+          <tr><th>Coûts de production</th><td>Valeur des sorties de stock = lots vendus × CMUP (coût moyen pondéré) du produit ce mois-ci. C'est le « coût des lots vendus » du résultat.</td></tr>
+          <tr><th>Coûts hors production</th><td>Salaires + frais de structure + frais de stockage (0,33 % du stock final) + publicité + transport + autres dépenses (dont dotations aux amortissements si vous en saisissez).</td></tr>
+          <tr><th>Charges directes / indirectes</th><td>Le transport saisi sur une vente est <b>direct</b> : il est affecté à cette vente. Tout le reste (salaires, structure, stockage, pub, transport des achats, autres) est <b>indirect</b> et réparti avec la clé de répartition.</td></tr>
+          <tr><th>Clé de répartition</th><td>Par défaut le chiffre d'affaires, comme dans le support : un produit qui fait 66,67 % du CA reçoit 66,67 % des charges indirectes. Vous pouvez choisir « nombre de lots vendus » à la place.</td></tr>
+          <tr><th>Coût / lot</th><td>Coût de revient ÷ lots vendus. En dessous de ce prix, la vente fait perdre de l'argent.</td></tr>
+          <tr><th>Prix moyen, marge / lot, résultat, marge %</th><td>Prix moyen = CA ÷ lots. Marge / lot = prix moyen − coût / lot. Résultat = CA − coût de revient. Marge % = résultat ÷ CA.</td></tr>
+          <tr><th>Prix pour X %</th><td>Prix de vente qui donne la marge visée (réglable, 20 % par défaut) : <i>coût / lot ÷ (1 − X %)</i>. Exemple : coût 36 €, marge 20 % → 36 ÷ 0,8 = 45 €. Badge rouge : ce prix dépasse le maximum de la fourchette client ; vert : le minimum de la fourchette suffit.</td></tr>
+          <tr><th>Tableaux</th><td>Par produit, par marché (Vignerons, Caves, Négociants / Grands comptes, « Autre » pour une vente sans segment), par produit et par marché, puis l'évolution mois par mois. Le résultat total est égal au « résultat du mois » du tableau de bord.</td></tr>
+        </tbody></table>
+        <p class="muted small">Ces réglages (mois, clé, marge visée) ne modifient aucune donnée enregistrée.</p>
+      </div>
+
       <div class="card" id="g-simu">
         <h2>Simulateur d'offre</h2>
         <p>Sert à tester une offre <b>sans rien enregistrer</b>. Le site fait une copie temporaire de vos données, y ajoute l'offre, et recalcule toute l'année.</p>
@@ -197,6 +218,6 @@
   <div id="tooltip" class="tooltip" role="status" hidden></div>
   <div id="toast" class="toast" hidden></div>
 
-  <script type="module" src="app.js?v=1.6"></script>
+  <script type="module" src="app.js?v=1.7"></script>
 </body>
 </html>

@@ -2,7 +2,7 @@
 // Tout est stocké dans le navigateur (localStorage). Partage via export JSON ou lien.
 
 // Numéro de version affiché dans l'en-tête : à augmenter à chaque mise à jour du site
-const APP_VERSION = "1.6";
+const APP_VERSION = "1.7";
 const APP_DATE = "24/11/2026";
 const STORE_KEY = "pilotage-bouchons-v1";
 const KEY_KEY = "pilotage-bouchons-apikey";
@@ -80,6 +80,7 @@ function defaultState() {
 let state = load();
 let ui = {
   tab: "dashboard", editMonth: state.currentMonth, busy: false,
+  rev: { mois: null, cle: "ca", marge: 20 },
   simu: { type: "achat", produit: "Agglomérés", segment: "Vignerons", lots: 5000, prix: 21, delai: 1, livraison: 1, transport: "Train", coutTransport: 0, mois: state.currentMonth },
 };
 
@@ -191,14 +192,14 @@ function compute(s) {
     const cmupP = {};
     const dispoP = {};
     for (const pr of PRODUITS) { dispoP[pr] = stock[pr].lots; cmupP[pr] = stock[pr].lots > 0 ? stock[pr].val / stock[pr].lots : 0; }
-    let venLots = 0, ca = 0, coutVentes = 0;
+    let venLots = 0, ca = 0, coutVentes = 0, transportVentes = 0;
     const venteP = {};
     for (const v of ventesDuMois(m)) {
       const l = n0(v.lots), pr = n0(v.prix), prod = normProduit(v.produit);
       venLots += l; ca += l * pr; coutVentes += l * cmupP[prod];
       venteP[prod] = (venteP[prod] || 0) + l;
       enc[i + n0(v.delai)] += l * pr;
-      transport += n0(v.coutTransport);
+      transport += n0(v.coutTransport); transportVentes += n0(v.coutTransport);
       if (v.transport) rse[v.transport] = (rse[v.transport] || 0) + l;
     }
     let lotsFin = 0, valFin = 0;
@@ -227,7 +228,7 @@ function compute(s) {
     rows.push({
       i, nom: m.nom, tresoDebut, encaissements: enc[i], paiementsAchats: decAch[i], fixes, stockage, transport, divers, pub,
       decaissements: decaiss, tresoFin, cmdLots, cmdVal, recLots, recVal, venLots, ca, coutVentes, lotsDebut, lotsFin, valFin, transit,
-      demande, perdue, cmup: cmupP["Agglomérés"], cmupP, dispoP, finP, venteP, resultat, cumRes, marge: ca - coutVentes, rse, stockNeg,
+      demande, perdue, transportVentes, cmup: cmupP["Agglomérés"], cmupP, dispoP, finP, venteP, resultat, cumRes, marge: ca - coutVentes, rse, stockNeg,
     });
     treso = tresoFin;
   }
@@ -297,6 +298,130 @@ function priceBadge(seg, prod, prix) {
   return `<span class="badge good" title="Fourchette ${r[0]}–${r[1]} €">${r[0]}–${r[1]} €</span>`;
 }
 
+// ---------- coût de revient (méthode des coûts complets) ----------
+// Coûts de production = lots vendus × CMUP ; transport d'une vente = charge directe de la ligne ;
+// charges indirectes (salaires, structure, stockage, pub, transport achats, autres) réparties par clé (CA ou lots).
+function revientMois(c, i, cle = "ca") {
+  const r = c.rows[i], m = state.months[i];
+  const lignes = ventesDuMois(m).map((v) => {
+    const lots = n0(v.lots), prod = normProduit(v.produit);
+    return { produit: prod, segment: SEGMENTS.includes(v.segment) ? v.segment : "Autre", lots, ca: lots * n0(v.prix), prod: lots * (r.cmupP[prod] || 0), direct: n0(v.coutTransport) };
+  }).filter((l) => l.lots > 0);
+  const ind = {
+    "Salaires": n0(state.params.salaires), "Frais de structure": n0(state.params.structure), "Frais de stockage": r.stockage,
+    "Publicité / marketing": r.pub, "Transport des achats": r.transport - r.transportVentes, "Autres dépenses": r.divers - r.pub,
+  };
+  const totInd = Object.values(ind).reduce((a, b) => a + b, 0);
+  const totCA = lignes.reduce((t, l) => t + l.ca, 0), totLots = lignes.reduce((t, l) => t + l.lots, 0);
+  const useCA = cle === "ca" && totCA > 0;
+  lignes.forEach((l) => { l.part = useCA ? l.ca / totCA : (totLots ? l.lots / totLots : 0); l.indirect = totInd * l.part; });
+  const agg = (keyFn) => {
+    const map = new Map();
+    lignes.forEach((l) => {
+      const k = keyFn(l); const a = map.get(k) || { key: k, lots: 0, ca: 0, prod: 0, direct: 0, indirect: 0, part: 0 };
+      a.lots += l.lots; a.ca += l.ca; a.prod += l.prod; a.direct += l.direct; a.indirect += l.indirect; a.part += l.part; map.set(k, a);
+    });
+    return [...map.values()].map((a) => ({ ...a, cout: a.prod + a.direct + a.indirect, horsProd: a.direct + a.indirect }));
+  };
+  const global = agg(() => "Total")[0] || { key: "Total", lots: 0, ca: 0, prod: 0, direct: 0, indirect: 0, part: 0, cout: totInd, horsProd: totInd };
+  if (!lignes.length) global.indirect = totInd;
+  return {
+    r, ind, totInd, useCA, global, nbLignes: lignes.length,
+    parProduit: agg((l) => l.produit),
+    parSegment: agg((l) => l.segment),
+    parCroise: agg((l) => `${l.produit}|${l.segment}`),
+  };
+}
+
+function renderRevient(c) {
+  const el = document.getElementById("tab-revient");
+  if (!el) return;
+  const nM = state.months.length;
+  let i = ui.rev.mois;
+  if (i === null || i >= nM) {
+    // par défaut : le dernier mois ≤ mois en cours qui a des ventes (le support parle du cycle précédent)
+    i = state.currentMonth;
+    for (let k = state.currentMonth; k >= 0; k--) if (c.rows[k].venLots > 0) { i = k; break; }
+  }
+  const cle = ui.rev.cle, tm = Math.min(95, Math.max(0, n0(ui.rev.marge)));
+  const R = revientMois(c, i, cle);
+  const g = R.global;
+  const u = (v, l) => (l > 0 ? v / l : NaN);
+  const pct = (v) => (Number.isFinite(v) ? (v * 100).toLocaleString("fr-FR", { maximumFractionDigits: 1 }) + " %" : "—");
+  const prixCible = (cu) => (Number.isFinite(cu) ? cu / (1 - tm / 100) : NaN);
+  const segName = (s) => SEG_LABEL[s] || s;
+  const rowHtml = (a, label, seg, prod) => {
+    const cu = u(a.cout, a.lots), pm = u(a.ca, a.lots), res = a.ca - a.cout, pc = prixCible(cu);
+    let badge = "";
+    if (seg && prod && Number.isFinite(pc)) {
+      const rg = range(seg, prod);
+      if (rg) badge = pc > rg[1] ? ` <span class="badge crit" title="Fourchette ${rg[0]}–${rg[1]} €">> max ${rg[1]} €</span>` : pc < rg[0] ? ` <span class="badge good" title="Fourchette ${rg[0]}–${rg[1]} €">mini ${rg[0]} €</span>` : "";
+    }
+    return `<tr><td>${label}</td><td class="r">${fmtN(a.lots)}</td><td class="r">${fmtE(a.ca)}</td><td class="r">${pct(a.part)}</td><td class="r">${fmtE(a.prod)}</td><td class="r">${fmtE(a.horsProd)}</td><td class="r"><b>${fmtE(a.cout)}</b></td>
+      <td class="r"><b>${fmtP(cu)}</b></td><td class="r">${fmtP(pm)}</td><td class="r ${cls(pm - cu)}">${fmtP(pm - cu)}</td><td class="r ${cls(res)}">${fmtE(res)}</td><td class="r ${cls(res)}">${a.ca ? pct(res / a.ca) : "—"}</td><td class="r">${fmtP(pc)}${badge}</td></tr>`;
+  };
+  const head = (first) => `<thead><tr><th>${first}</th><th class="r">Lots vendus</th><th class="r">CA</th><th class="r">Part clé</th><th class="r">Coût production</th><th class="r">Hors production</th><th class="r">Coût de revient</th><th class="r">Coût / lot</th><th class="r">Prix moyen</th><th class="r">Marge / lot</th><th class="r">Résultat</th><th class="r">Marge %</th><th class="r">Prix pour ${tm} %</th></tr></thead>`;
+  const table = (first, list, labelFn, segFn, prodFn) => list.length
+    ? `<div class="table-wrap"><table>${head(first)}<tbody>${list.map((a) => rowHtml(a, labelFn(a), segFn?.(a), prodFn?.(a))).join("")}${list.length > 1 ? rowHtml(g, "<b>Total</b>") : ""}</tbody></table></div>`
+    : `<p class="muted">Aucune vente saisie pour ${esc(R.r.nom)}.</p>`;
+  const cuG = u(g.cout, g.lots), pmG = u(g.ca, g.lots), resG = g.ca - g.cout;
+  const evo = c.rows.map((row) => { const x = revientMois(c, row.i, cle).global; return { row, x, cu: u(x.cout, x.lots), pm: u(x.ca, x.lots) }; });
+
+  el.innerHTML = `
+    <div class="card">
+      <h2>Coût de revient</h2>
+      <p class="muted small">Méthode des coûts complets du support de contrôle de gestion : <b>coût de revient = (coûts de production + coûts hors production) ÷ quantité vendue</b>. Les charges indirectes sont réparties entre produits et marchés avec une clé de répartition.</p>
+      <div class="form-grid">
+        <label class="field">Mois analysé <select data-rev="mois">${state.months.map((mm, k) => `<option value="${k}" ${k === i ? "selected" : ""}>${esc(mm.nom)}${c.rows[k].venLots ? "" : " (pas de ventes)"}</option>`).join("")}</select></label>
+        <label class="field">Clé de répartition des charges indirectes <select data-rev="cle"><option value="ca" ${cle === "ca" ? "selected" : ""}>Chiffre d'affaires (comme le support)</option><option value="lots" ${cle === "lots" ? "selected" : ""}>Nombre de lots vendus</option></select></label>
+        <label class="field">Marge visée (% du prix de vente) <input type="number" min="0" max="95" step="1" data-rev="marge" value="${tm}"></label>
+      </div>
+    </div>
+
+    <div class="grid k4">
+      <div class="card kpi"><div class="label">Coût de revient ${esc(R.r.nom)}</div><div class="value">${fmtE(g.cout)}</div><div class="hint">production ${fmtE(g.prod)} + hors production ${fmtE(g.horsProd)}</div></div>
+      <div class="card kpi"><div class="label">Coût de revient par lot</div><div class="value">${fmtP(cuG)}</div><div class="hint">${fmtN(g.lots)} lots vendus</div></div>
+      <div class="card kpi"><div class="label">Prix moyen de vente</div><div class="value">${fmtP(pmG)}</div><div class="hint">marge ${fmtP(pmG - cuG)} / lot</div></div>
+      <div class="card kpi"><div class="label">Prix pour ${tm} % de marge</div><div class="value">${fmtP(prixCible(cuG))}</div><div class="hint">= coût / lot ÷ (1 − ${tm} %)</div></div>
+    </div>
+
+    <div class="grid c2 section-gap">
+      <div class="card">
+        <h2>1 · Coûts de production (sorties de stock)</h2>
+        <table><thead><tr><th>Produit</th><th class="r">Lots vendus</th><th class="r">CMUP</th><th class="r">Sortie de stock</th></tr></thead><tbody>
+          ${R.parProduit.map((a) => `<tr><td>${esc(a.key)}</td><td class="r">${fmtN(a.lots)}</td><td class="r">${fmtP(R.r.cmupP[a.key])}</td><td class="r">${fmtE(a.prod)}</td></tr>`).join("") || `<tr><td colspan="4" class="muted">Aucune vente</td></tr>`}
+          <tr><td><b>Total</b></td><td class="r"><b>${fmtN(g.lots)}</b></td><td></td><td class="r"><b>${fmtE(g.prod)}</b></td></tr>
+        </tbody></table>
+        <p class="muted small">Sortie de stock = lots vendus × coût unitaire moyen pondéré (CMUP) du mois.</p>
+      </div>
+      <div class="card">
+        <h2>2 · Coûts hors production</h2>
+        <table><thead><tr><th>Charge</th><th>Type</th><th class="r">Montant</th></tr></thead><tbody>
+          ${Object.entries(R.ind).map(([k, v]) => `<tr><td>${k}</td><td><span class="badge warn">indirecte</span></td><td class="r">${fmtE(v)}</td></tr>`).join("")}
+          <tr><td>Transport des ventes</td><td><span class="badge good">directe</span></td><td class="r">${fmtE(g.direct)}</td></tr>
+          <tr><td>Dotations aux amortissements</td><td class="muted small" colspan="2">à saisir dans « autres dépenses » si le jeu en compte</td></tr>
+          <tr><td><b>Total</b></td><td></td><td class="r"><b>${fmtE(R.totInd + g.direct)}</b></td></tr>
+        </tbody></table>
+        <p class="muted small">Indirectes : réparties au prorata ${R.useCA ? "du chiffre d'affaires" : "des lots vendus"} de chaque produit / marché. Directes : affectées à la vente concernée.</p>
+      </div>
+    </div>
+
+    <div class="card"><h2>Par produit</h2>${table("Produit", R.parProduit, (a) => esc(a.key))}</div>
+    <div class="card"><h2>Par marché (segment)</h2>${table("Marché", R.parSegment, (a) => esc(segName(a.key)))}</div>
+    <div class="card"><h2>Par produit et par marché</h2>${table("Produit · marché", R.parCroise, (a) => { const [p, s2] = a.key.split("|"); return `${esc(p)} · ${esc(segName(s2))}`; }, (a) => a.key.split("|")[1], (a) => a.key.split("|")[0])}
+      <p class="muted small">« Prix pour ${tm} % » : prix de vente par lot qui donne ${tm} % de marge sur le coût de revient complet. Badge rouge : ce prix dépasse le maximum de la fourchette client (impossible à facturer) ; vert : le minimum de la fourchette suffit déjà.</p>
+    </div>
+
+    <div class="card">
+      <h2>Évolution par mois</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Mois</th><th class="r">Lots vendus</th><th class="r">CA</th><th class="r">Coût production</th><th class="r">Hors production</th><th class="r">Coût de revient</th><th class="r">Coût / lot</th><th class="r">Prix moyen</th><th class="r">Marge / lot</th><th class="r">Résultat</th></tr></thead>
+        <tbody>${evo.map(({ row, x, cu, pm }) => `<tr class="${row.i === i ? "current" : ""}"><td>${esc(row.nom)}</td><td class="r">${fmtN(x.lots)}</td><td class="r">${fmtE(x.ca)}</td><td class="r">${fmtE(x.prod)}</td><td class="r">${fmtE(x.horsProd)}</td><td class="r"><b>${fmtE(x.cout)}</b></td><td class="r">${fmtP(cu)}</td><td class="r">${fmtP(pm)}</td><td class="r ${cls(pm - cu)}">${fmtP(pm - cu)}</td><td class="r ${cls(x.ca - x.cout)}">${fmtE(x.ca - x.cout)}</td></tr>`).join("")}</tbody>
+      </table></div>
+      <p class="muted small">Le résultat ici est identique au « résultat du mois » du tableau de bord : CA − coût de revient complet.</p>
+    </div>`;
+}
+
 // ---------- rendu ----------
 function render() {
   const c = compute(state);
@@ -305,6 +430,7 @@ function render() {
   renderMois(c);
   renderStock(c);
   renderSimu(c);
+  renderRevient(c);
   renderIA(c);
   renderParams();
 }
@@ -757,6 +883,7 @@ function contextForAI(c) {
     chargesFixes: r.fixes, publicite: r.pub, stockage: Math.round(r.stockage), transportEtDivers: Math.round(r.transport + r.divers - r.pub), tresoFin: Math.round(r.tresoFin),
     demandeClients: r.demande, demandePerdue: r.perdue, lotsCommandes: r.cmdLots, lotsRecus: r.recLots, lotsVendus: r.venLots, stockFinParProduit: Object.fromEntries(PRODUITS.filter((p) => r.finP[p]).map((p) => [p, r.finP[p]])),
     enTransit: r.transit, coutMoyenAgglo: +r.cmup.toFixed(2), CA: Math.round(r.ca), resultat: Math.round(r.resultat),
+    coutRevientParLot: r.venLots ? +((r.ca - r.resultat) / r.venLots).toFixed(2) : null,
   }));
   const details = state.months.map((m) => ({
     mois: m.nom,
@@ -1095,6 +1222,12 @@ document.addEventListener("input", (e) => {
   const t = e.target;
   if (t.dataset.note) { state.months[+t.dataset.m][t.dataset.note] = t.value; save(); return; }
   if (t.id === "rules") { state.rules = t.value; save(); return; }
+  if (t.dataset.rev) {
+    const k = t.dataset.rev;
+    ui.rev[k] = k === "cle" ? t.value : n0(t.value);
+    renderRevient(compute(state));
+    return;
+  }
   if (t.dataset.simu) {
     const k = t.dataset.simu;
     ui.simu[k] = ["type", "transport", "produit", "segment"].includes(k) ? t.value : n0(t.value);
