@@ -248,3 +248,18 @@ label.field input, label.field select { width: 100%; }
 @media (max-width: 560px) { .seg-grid { grid-template-columns: 1fr; } }
 
 tr.inactive td { opacity: .55; }
+
+/* guide */
+.guide h3 { margin-top: 14px; }
+.guide ul { margin: 6px 0; padding-left: 20px; }
+.guide li { margin: 4px 0; }
+.formula {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85rem;
+  background: var(--surface-2); border-left: 3px solid var(--accent); padding: 8px 12px; border-radius: 6px; margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+.toc { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.toc a { font-size: .85rem; color: var(--accent); text-decoration: none; border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; }
+.toc a:hover { background: var(--surface-2); }
+.gtable th { width: 28%; text-transform: none; letter-spacing: 0; font-size: .88rem; color: var(--text); vertical-align: top; white-space: normal; }
+.gtable td { white-space: normal; color: var(--text-2); }

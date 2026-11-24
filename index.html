@@ -31,6 +31,7 @@
     <button class="tab" data-tab="simu">Simulateur d'offre</button>
     <button class="tab" data-tab="ia">Conseiller IA</button>
     <button class="tab" data-tab="params">Paramètres &amp; partage</button>
+    <button class="tab" data-tab="guide">Guide</button>
   </nav>
 
   <main>
@@ -40,6 +41,152 @@
     <section id="tab-simu" class="panel"></section>
     <section id="tab-ia" class="panel"></section>
     <section id="tab-params" class="panel"></section>
+    <section id="tab-guide" class="panel guide">
+      <div class="card">
+        <h2>Guide du site</h2>
+        <p>Ce guide explique chaque onglet, chaque chiffre affiché et la façon dont il est calculé. Les calculs suivent les règles du jeu : charges fixes, livraison industriel à 30 jours, fourchettes de prix, stockage à 0,33 %.</p>
+        <div class="alert info"><span class="ico">i</span><span><b>Vos données</b> sont enregistrées automatiquement dans votre navigateur à chaque modification. Elles restent après une actualisation ou une mise à jour du site. Elles ne sont pas partagées automatiquement avec les autres appareils : pensez à faire régulièrement un <b>Exporter (.json)</b> dans « Paramètres &amp; partage », qui sert aussi de sauvegarde.</span></div>
+        <nav class="toc">
+          <a href="#g-principes">Principes de calcul</a>
+          <a href="#g-dashboard">Tableau de bord</a>
+          <a href="#g-mois">Saisie du mois</a>
+          <a href="#g-stock">Stock</a>
+          <a href="#g-simu">Simulateur d'offre</a>
+          <a href="#g-ia">Conseiller IA</a>
+          <a href="#g-params">Paramètres &amp; partage</a>
+        </nav>
+      </div>
+
+      <div class="card" id="g-principes">
+        <h2>Principes de calcul (valables partout)</h2>
+        <h3>Le mois en cours</h3>
+        <p>Le sélecteur « Mois en cours » en haut à droite indique où vous en êtes dans le jeu. Les mois <b>avant ou égaux</b> sont considérés comme joués ; les mois <b>après</b> sont une <b>prévision</b> calculée à partir de ce que vous avez déjà saisi (achats, paiements à venir, charges fixes…).</p>
+        <h3>Trésorerie</h3>
+        <div class="formula">Trésorerie fin de mois = Trésorerie début + Encaissements − Décaissements</div>
+        <ul>
+          <li><b>Trésorerie de départ</b> (début janvier) = capital de départ (500 000 €).</li>
+          <li><b>Encaissements du mois</b> = toutes les ventes dont <i>mois de vente + délai de paiement client</i> tombe ce mois-ci. Comptant = même mois, 30 jours = mois suivant, 60 jours = deux mois après.</li>
+          <li><b>Décaissements du mois</b> = salaires + frais de structure + frais de stockage + publicité + coûts de transport + autres dépenses + <b>paiements fournisseurs exigibles</b>.</li>
+          <li><b>Paiements fournisseurs exigibles</b> = achats <b>validés</b> dont <i>mois d'achat + délai de paiement</i> tombe ce mois-ci, plus le stock de départ (12 000 × 25 € = 300 000 €) payé fin janvier.</li>
+        </ul>
+        <h3>Stock</h3>
+        <div class="formula">Stock fin = Stock début + Lots reçus − Lots vendus</div>
+        <ul>
+          <li><b>Lots reçus</b> : un achat validé chez un industriel arrive <b>au début du mois suivant</b> (livraison 30 jours) ; un achat à un distributeur arrive tout de suite (instantané).</li>
+          <li><b>Lots vendus</b> = lots livrés aux segments (étape A) + « autres ventes ».</li>
+          <li><b>En transit</b> = lots achetés et validés mais pas encore reçus.</li>
+          <li>Chaque produit (Agglomérés, Q1 à Q4) a son propre stock.</li>
+        </ul>
+        <h3>Coût moyen (CMUP)</h3>
+        <div class="formula">Coût moyen = (Valeur du stock + Valeur des lots reçus) ÷ (Lots en stock + Lots reçus)</div>
+        <p>C'est le coût moyen pondéré : il est recalculé à chaque réception. Exemple : 12 000 lots à 25 € + 5 000 lots reçus à 21 € → (300 000 + 105 000) ÷ 17 000 = 23,82 €/lot. Les ventes sortent du stock à ce coût.</p>
+        <h3>Frais de stockage</h3>
+        <div class="formula">Stockage = 0,33 % × Valeur du stock en fin de mois (lots restants × coût moyen)</div>
+        <h3>Résultat (bénéfice ou perte)</h3>
+        <div class="formula">Résultat = Chiffre d'affaires − Coût des lots vendus − Salaires − Frais de structure − Stockage − Publicité − Transport − Autres dépenses</div>
+        <ul>
+          <li><b>Chiffre d'affaires</b> = lots vendus × prix de vente.</li>
+          <li><b>Coût des lots vendus</b> = lots vendus × coût moyen du produit.</li>
+          <li><b>Marge brute</b> = chiffre d'affaires − coût des lots vendus.</li>
+          <li>Le résultat ne dépend pas des délais de paiement : une vente à 60 jours compte dans le résultat du mois de vente, mais dans la trésorerie deux mois plus tard.</li>
+        </ul>
+        <h3>Prix effectif</h3>
+        <p>Comme dans le jeu, un prix hors fourchette est ramené au plancher ou au plafond du segment. Un prix non saisi (0) compte comme le prix plancher.</p>
+      </div>
+
+      <div class="card" id="g-dashboard">
+        <h2>Tableau de bord</h2>
+        <table class="gtable"><tbody>
+          <tr><th>Trésorerie fin [mois]</th><td>Trésorerie en fin de mois en cours (formule ci-dessus). « Début de mois » = trésorerie fin du mois précédent.</td></tr>
+          <tr><th>Stock fin [mois]</th><td>Total des lots en stock en fin de mois, tous produits. « Valeur » = lots × coût moyen. « En transit » = lots commandés pas encore reçus.</td></tr>
+          <tr><th>Résultat cumulé</th><td>Somme des résultats de janvier jusqu'au mois en cours. « Mois » = résultat du mois en cours seul.</td></tr>
+          <tr><th>Trésorerie minimale prévue</th><td>La plus basse trésorerie de fin de mois sur toute l'année (mois joués + prévision). Si elle est négative, vous allez dans le rouge à ce mois-là si rien ne change.</td></tr>
+          <tr><th>Graphique « Trésorerie fin de mois »</th><td>Une barre par mois. Bleu = positif, rouge = négatif. Barres pâles = mois futurs (prévision). Survolez une barre pour voir le détail : début, encaissements, décaissements, fin, stock.</td></tr>
+          <tr><th>Alertes</th><td>Rouge : trésorerie négative prévue, ou ventes supérieures au stock disponible. Orange : trésorerie sous le seuil d'alerte (réglable dans Paramètres, 50 000 € par défaut).</td></tr>
+          <tr><th>À venir</th><td>Encaissements clients attendus et paiements fournisseurs dus <b>après</b> le mois en cours ; lots en transit ; charges fixes mensuelles (salaires + structure) ; note RSE.</td></tr>
+          <tr><th>Récapitulatif mensuel</th><td>Le détail de chaque mois : trésorerie début, encaissements, paiements d'achats, charges fixes, stockage, pub + transport + divers, trésorerie fin, lots reçus, lots vendus, stock fin, résultat. La ligne grisée est le mois en cours.</td></tr>
+        </tbody></table>
+      </div>
+
+      <div class="card" id="g-mois">
+        <h2>Saisie du mois</h2>
+        <p>Les boutons de mois en haut permettent de saisir ou relire n'importe quel mois. Un point rouge signale un mois où la trésorerie finit en négatif. Les 4 indicateurs en haut concernent le mois affiché : trésorerie début et fin, <b>stock vendable</b> (stock début + lots reçus ce mois), résultat et marge brute.</p>
+        <h3>Phase de planification · Positionnement marketing</h3>
+        <ul>
+          <li><b>Prix Agglomérés</b> par segment : recopiez le prix saisi dans Vinego. S'il sort de la fourchette, il est ramené au plancher/plafond (message affiché). Le badge vert indique la fourchette ; la <b>marge</b> = prix − coût moyen actuel des agglomérés.</li>
+          <li><b>Délai de paiement</b> : comptant, 30 ou 60 jours. Il décale l'encaissement des ventes de ce segment.</li>
+          <li><b>Publicité</b> : montant décaissé ce mois-ci et compté en charge. Dans le jeu, elle n'augmente la demande que sur le mois en cours.</li>
+        </ul>
+        <h3>Étape A · Répartir les livraisons</h3>
+        <ul>
+          <li><b>Demande</b> : recopiez le tableau « Quantité de produits commandés par les clients » du jeu.</li>
+          <li><b>Livré</b> : si le stock suffit, il est rempli automatiquement = demande. En pénurie, saisissez la répartition (jamais plus que la demande) ou utilisez <b>Répartir automatiquement</b>.</li>
+          <li><b>Répartir automatiquement</b> : sert d'abord les segments au prix effectif le plus élevé (à prix égal, celui qui paie le plus vite), jusqu'à épuisement du stock disponible (moins les « autres ventes » d'agglomérés).</li>
+          <li><b>Perdu</b> = demande − livré : ventes parties chez les concurrents.</li>
+          <li><b>CA</b> = livré × prix effectif. <b>Marge</b> = livré × (prix effectif − coût moyen).</li>
+        </ul>
+        <h3>Étape B · Négociations (achats)</h3>
+        <ul>
+          <li><b>Statut</b> : seules les offres <b>Validées</b> comptent dans la trésorerie et le stock. « En négociation » et « Refusée / annulée » sont gardées pour mémoire (lignes grisées).</li>
+          <li><b>Livraison</b> : 30 jours (industriel) → reçu le mois suivant ; instantané (distributeur) → reçu ce mois.</li>
+          <li><b>Paiement</b> : comptant, 30 ou 60 jours → mois où le montant sort de la trésorerie.</li>
+          <li><b>Total</b> = lots × prix. Le badge « ↑ marché » apparaît si le prix des agglomérés dépasse le prix marché (21 €).</li>
+          <li><b>Coût transport</b> : montant total en € (pas par lot), payé le mois de l'achat.</li>
+        </ul>
+        <h3>Autres ventes, autres dépenses, notes</h3>
+        <ul>
+          <li><b>Autres ventes</b> : ventes hors tableau de l'étape A (autres produits, revente à un distributeur…). Elles comptent dans le stock, le CA et la trésorerie.</li>
+          <li><b>Autres dépenses / recettes</b> : montant positif = dépense, négatif = recette (ex. prêt reçu). Comptées le mois saisi.</li>
+          <li><b>Charges automatiques</b> : le récapitulatif de ce que le site compte tout seul ce mois-là.</li>
+          <li><b>Notes</b> : texte libre pour chaque phase ; l'IA les lit.</li>
+        </ul>
+      </div>
+
+      <div class="card" id="g-stock">
+        <h2>Stock</h2>
+        <table class="gtable"><tbody>
+          <tr><th>Stock fin</th><td>Lots restants en fin de mois en cours (+ lots en transit).</td></tr>
+          <tr><th>Coût moyen agglomérés</th><td>Coût moyen pondéré (CMUP) des agglomérés, comparé au prix marché.</td></tr>
+          <tr><th>Couverture</th><td>Stock fin ÷ moyenne des lots vendus par mois (sur les mois où il y a eu des ventes) = nombre de mois de ventes que le stock permet de tenir.</td></tr>
+          <tr><th>Coût de stockage du mois</th><td>0,33 % × valeur du stock en fin de mois.</td></tr>
+          <tr><th>Stock par produit</th><td>Lots, coût moyen et valeur par produit, avec les fourchettes de prix de vente par segment (Vignerons / Caves / Négociants).</td></tr>
+          <tr><th>Mouvements de stock</th><td>Par mois : stock début, lots commandés (achats validés du mois), reçus, vendus, stock fin, en transit, valeur fin. La barre « Niveau » compare le stock fin au plus haut niveau de l'année.</td></tr>
+          <tr><th>Bilan RSE</th><td>Chaque lot transporté reçoit une note selon le transport : Train 1, Camion 2, Bateau 3, Avion 4. Score = moyenne pondérée par les lots. ≤ 1,5 : très bon · ≤ 2,3 : correct · au-delà : mauvais.</td></tr>
+        </tbody></table>
+      </div>
+
+      <div class="card" id="g-simu">
+        <h2>Simulateur d'offre</h2>
+        <p>Sert à tester une offre <b>sans rien enregistrer</b>. Le site fait une copie temporaire de vos données, y ajoute l'offre, et recalcule toute l'année.</p>
+        <ul>
+          <li><b>Impact</b> : vert si la trésorerie reste positive sur toute l'année, rouge sinon (avec le mois concerné), ou si le stock ne suffit pas.</li>
+          <li><b>Avis sur le prix</b> : pour un achat, écart avec le prix marché × lots = surcoût ou économie. Pour une vente, marge unitaire = prix − coût moyen, et fourchette du segment.</li>
+          <li><b>Tableau « Sans / Avec l'offre »</b> : trésorerie fin du mois choisi, trésorerie minimale de l'année, stock fin, résultat cumulé en fin d'année.</li>
+          <li><b>Enregistrer cette offre</b> : ajoute réellement la ligne au mois choisi. Pensez à vérifier son statut ensuite.</li>
+        </ul>
+      </div>
+
+      <div class="card" id="g-ia">
+        <h2>Conseiller IA</h2>
+        <ul>
+          <li><b>Diagnostic automatique</b> (gratuit, sans IA) : règles calculées en direct sur vos données. Marge par segment (bornes de la fourchette − coût moyen), nombre de lots à vendre pour couvrir les charges fixes (60 000 € ÷ marge par lot), demande perdue, pub trop élevée par rapport au stock, prix hors fourchette ou sous le coût…</li>
+          <li><b>Achat conseillé</b> = demande observée du mois × 1,1 − stock restant en fin de mois − lots déjà commandés qui arrivent le mois suivant.</li>
+          <li><b>Discuter avec Claude</b> (payant à l'usage, clé API nécessaire) : à chaque question, l'IA reçoit les règles du jeu (onglet Paramètres), les fourchettes de prix, le tableau mensuel calculé, toutes vos saisies et vos notes. Elle ne modifie jamais vos données.</li>
+        </ul>
+      </div>
+
+      <div class="card" id="g-params">
+        <h2>Paramètres &amp; partage</h2>
+        <ul>
+          <li><b>Paramètres du jeu</b> : capital, salaires, structure, taux de stockage, prix marché, seuil d'alerte, stock de départ. Une modification recalcule tout le site.</li>
+          <li><b>Fourchettes de prix clients</b> : min/max par segment et par produit, utilisés pour ramener les prix dans les limites et pour les badges.</li>
+          <li><b>Règles et infos du jeu</b> : texte lu par l'IA ; ajoutez-y toute nouvelle information du jeu.</li>
+          <li><b>Copier un lien de partage</b> : met toutes vos données dans un lien. <b>Attention :</b> ouvrir ce lien remplace les données du navigateur qui l'ouvre.</li>
+          <li><b>Exporter / Importer (.json)</b> : sauvegarde complète dans un fichier ; l'import remplace les données actuelles par celles du fichier.</li>
+          <li><b>Tout réinitialiser</b> : efface toutes les données (demande confirmation). À n'utiliser qu'après un export.</li>
+        </ul>
+      </div>
+    </section>
   </main>
 
   <div id="tooltip" class="tooltip" role="status" hidden></div>
