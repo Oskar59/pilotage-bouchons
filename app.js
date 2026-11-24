@@ -2,7 +2,7 @@
 // Tout est stocké dans le navigateur (localStorage). Partage via export JSON ou lien.
 
 // Numéro de version affiché dans l'en-tête : à augmenter à chaque mise à jour du site
-const APP_VERSION = "1.9";
+const APP_VERSION = "1.10";
 const APP_DATE = "24/11/2026";
 const STORE_KEY = "pilotage-bouchons-v1";
 const KEY_KEY = "pilotage-bouchons-apikey";
@@ -11,6 +11,8 @@ const BACKUP_MAX = 40;
 const CLOUD_KEY = STORE_KEY + "-cloud";       // { url, key, code, name } : jamais exporté ni dans le lien de partage
 const CLOUD_VER_KEY = STORE_KEY + "-cloudver"; // version du groupe sur laquelle ces données locales sont basées
 let cloudInvited = false;
+// Projet Supabase du groupe (URL + clé publishable : publiques par conception, l'accès aux données exige le code d'équipe)
+const CLOUD_DEFAULT = { url: "https://dlfdvvikcbymfnixdoeh.supabase.co", key: "sb_publishable_eJU54Kv2QJo9t__5WgajFw_FOh5RT-r" };
 const MOIS = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"];
 const PRODUITS = ["Agglomérés", "Q1", "Q2", "Q3", "Q4"];
 const SEGMENTS = ["Vignerons", "Caves", "Négociants"];
@@ -86,7 +88,7 @@ let state = load();
 let ui = {
   tab: "dashboard", editMonth: state.currentMonth, busy: false,
   rev: { mois: null, cle: "ca", marge: 20 },
-  cloudForm: { url: "", key: "", code: "", name: "" }, cloudHist: null,
+  cloudForm: { url: CLOUD_DEFAULT.url, key: CLOUD_DEFAULT.key, code: "", name: "" }, cloudHist: null,
   simu: { type: "achat", produit: "Agglomérés", segment: "Vignerons", lots: 5000, prix: 21, delai: 1, livraison: 1, transport: "Train", coutTransport: 0, mois: state.currentMonth },
 };
 
