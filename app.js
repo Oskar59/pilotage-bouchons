@@ -2,10 +2,12 @@
 // Tout est stocké dans le navigateur (localStorage). Partage via export JSON ou lien.
 
 // Numéro de version affiché dans l'en-tête : à augmenter à chaque mise à jour du site
-const APP_VERSION = "1.7";
+const APP_VERSION = "1.8";
 const APP_DATE = "24/11/2026";
 const STORE_KEY = "pilotage-bouchons-v1";
 const KEY_KEY = "pilotage-bouchons-apikey";
+const BACKUP_KEY = STORE_KEY + "-sauvegardes"; // copies datées, séparées des données
+const BACKUP_MAX = 40;
 const MOIS = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"];
 const PRODUITS = ["Agglomérés", "Q1", "Q2", "Q3", "Q4"];
 const SEGMENTS = ["Vignerons", "Caves", "Négociants"];
@@ -84,6 +86,35 @@ let ui = {
   simu: { type: "achat", produit: "Agglomérés", segment: "Vignerons", lots: 5000, prix: 21, delai: 1, livraison: 1, transport: "Train", coutTransport: 0, mois: state.currentMonth },
 };
 
+// ---------- sauvegardes ----------
+function listBackups() { try { return JSON.parse(localStorage.getItem(BACKUP_KEY) || "[]"); } catch { return []; } }
+// raw : chaîne JSON des données à sauvegarder (par défaut l'état enregistré actuellement)
+function snapshot(label, raw) {
+  try {
+    raw = raw ?? localStorage.getItem(STORE_KEY);
+    if (!raw) return false;
+    const o = JSON.parse(raw); o.chat = [];
+    const data = JSON.stringify(o);
+    const list = listBackups();
+    if (list[0] && list[0].data === data && !/manuelle/i.test(label)) return true; // rien n'a changé
+    list.unshift({ date: new Date().toISOString(), label, data });
+    while (list.length > BACKUP_MAX) list.pop();
+    for (;;) {
+      try { localStorage.setItem(BACKUP_KEY, JSON.stringify(list)); return true; }
+      catch { if (list.length <= 1) return false; list.pop(); }
+    }
+  } catch { return false; }
+}
+function downloadJson(obj, name) {
+  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+const stamp = () => { const d = new Date(), z = (x) => String(x).padStart(2, "0"); return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}_${z(d.getHours())}h${z(d.getMinutes())}`; };
+const fmtDate = (iso) => new Date(iso).toLocaleString("fr-FR", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+
 function load() {
   try {
     const fromHash = readHash();
@@ -131,6 +162,7 @@ function readHash() {
   try {
     const json = decodeURIComponent(escape(atob(location.hash.slice(6))));
     const s = migrate(JSON.parse(json));
+    snapshot("Automatique · avant ouverture d'un lien de partage");
     history.replaceState(null, "", location.pathname);
     setTimeout(() => toast("Données chargées depuis le lien partagé"), 300);
     return s;
@@ -1077,6 +1109,15 @@ function renderParams() {
         <button class="btn danger" id="resetAll" style="padding:7px 14px">Tout réinitialiser</button>
       </div>
       <p class="muted small">La clé API n'est jamais incluse dans le lien ni dans l'export.</p>
+    </div>
+    <div class="card" id="backups">
+      <h2>Sauvegardes</h2>
+      <p class="small">Le bouton <b>Sauvegarder</b> (en haut) enregistre une copie ici <b>et</b> télécharge un fichier dans vos Téléchargements. Une copie automatique est faite chaque jour à l'ouverture et avant tout import, lien de partage, restauration ou réinitialisation.</p>
+      ${(() => { const list = listBackups(); return list.length ? `<div class="table-wrap"><table>
+        <thead><tr><th>Date</th><th>Type</th><th>Contenu</th><th></th></tr></thead>
+        <tbody>${list.map((b, k) => { let info = ""; try { const o = JSON.parse(b.data); const nb = o.months.filter((m) => (m.achats || []).length || (m.ventes || []).length || Object.values(m.livraisons || {}).some((l) => +l.demande)).length; info = `${esc(o.team || "")} · mois en cours ${esc(o.months[o.currentMonth]?.nom || "")} · ${nb} mois saisis`; } catch {} return `<tr><td>${fmtDate(b.date)}</td><td class="small">${esc(b.label)}</td><td class="small muted">${info}</td><td class="r" style="white-space:nowrap"><button class="btn ghost" data-restore="${k}">Restaurer</button> <button class="btn ghost" data-dlbackup="${k}">Télécharger</button></td></tr>`; }).join("")}</tbody>
+      </table></div>` : `<p class="muted">Aucune sauvegarde pour l'instant.</p>`; })()}
+      <p class="muted small">Les ${BACKUP_MAX} copies les plus récentes sont gardées dans ce navigateur. Si le navigateur est vidé, elles disparaissent aussi : gardez les fichiers téléchargés (ou importez-les avec « Importer (.json) »).</p>
     </div>`;
 }
 
@@ -1113,6 +1154,21 @@ document.addEventListener("click", (e) => {
   }
   if (t.dataset.del) { state.months[ui.editMonth][t.dataset.del].splice(+t.dataset.j, 1); save(); render(); return; }
   if (t.dataset.q) { const ci = document.getElementById("chatInput"); if (ci) { ci.value = t.dataset.q; ci.focus(); } return; }
+  if (t.dataset.restore !== undefined) {
+    const b = listBackups()[+t.dataset.restore];
+    if (b && confirm(`Remplacer les valeurs actuelles par la sauvegarde du ${fmtDate(b.date)} ?\n(Les valeurs actuelles sont d'abord sauvegardées.)`)) {
+      snapshot("Automatique · avant restauration");
+      const chat = state.chat;
+      state = migrate(JSON.parse(b.data)); state.chat = chat || [];
+      ui.editMonth = state.currentMonth; save(); render(); toast("Sauvegarde restaurée");
+    }
+    return;
+  }
+  if (t.dataset.dlbackup !== undefined) {
+    const b = listBackups()[+t.dataset.dlbackup];
+    if (b) downloadJson(JSON.parse(b.data), `pilotage-bouchons-sauvegarde-${b.date.slice(0, 16).replace("T", "_").replace(":", "h")}.json`);
+    return;
+  }
   switch (t.id) {
     case "themeBtn": {
       const dark = document.documentElement.dataset.theme ? document.documentElement.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
@@ -1154,6 +1210,14 @@ document.addEventListener("click", (e) => {
       navigator.clipboard?.writeText(url).then(() => toast("Lien copié : envoyez-le au groupe"), () => prompt("Copiez ce lien :", url));
       break;
     }
+    case "backupBtn": {
+      save();
+      const ok = snapshot("Manuelle (bouton Sauvegarder)");
+      downloadJson(state, `pilotage-bouchons-sauvegarde-${stamp()}.json`);
+      toast(ok ? "Sauvegardé ✓ (copie dans le navigateur + fichier téléchargé)" : "Fichier téléchargé (copie navigateur impossible : stockage plein)");
+      if (ui.tab === "params") renderParams();
+      break;
+    }
     case "exportJson": {
       const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
       const a = document.createElement("a");
@@ -1161,7 +1225,7 @@ document.addEventListener("click", (e) => {
       a.download = `pilotage-bouchons-${state.months[state.currentMonth].nom.toLowerCase()}.json`;
       a.click(); URL.revokeObjectURL(a.href); break;
     }
-    case "resetAll": if (confirm("Effacer toutes les données et repartir des valeurs de départ ?")) { state = defaultState(); ui.editMonth = 0; save(); render(); } break;
+    case "resetAll": if (confirm("Effacer toutes les données et repartir des valeurs de départ ?\n(Une sauvegarde est faite avant.)")) { snapshot("Automatique · avant réinitialisation"); state = defaultState(); ui.editMonth = 0; save(); render(); } break;
   }
 });
 
@@ -1212,7 +1276,7 @@ document.addEventListener("change", (e) => {
   }
   if (t.id === "importJson" && t.files[0]) {
     t.files[0].text().then((txt) => {
-      try { state = migrate(JSON.parse(txt)); ui.editMonth = state.currentMonth; save(); render(); toast("Données importées"); }
+      try { const ns = migrate(JSON.parse(txt)); snapshot("Automatique · avant import d'un fichier"); state = ns; ui.editMonth = state.currentMonth; save(); render(); toast("Données importées"); }
       catch { toast("Fichier invalide"); }
     });
   }
@@ -1253,6 +1317,7 @@ try {
   const th = localStorage.getItem(STORE_KEY + "-theme"); if (th) document.documentElement.dataset.theme = th;
   const tab = localStorage.getItem(STORE_KEY + "-tab"); if (tab) ui.tab = tab;
 } catch {}
+{ const last = listBackups()[0]; if (!last || new Date(last.date).toDateString() !== new Date().toDateString()) snapshot("Automatique · ouverture du jour"); }
 document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === ui.tab));
 document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("active", p.id === "tab-" + ui.tab));
 save();

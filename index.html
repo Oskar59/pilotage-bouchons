@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Pilotage Bouchons</title>
   <meta name="description" content="Suivi de trésorerie, de stock et conseiller stratégique pour le jeu d'entreprise (distributeur de bouchons de liège).">
-  <link rel="stylesheet" href="style.css?v=1.7">
+  <link rel="stylesheet" href="style.css?v=1.8">
 </head>
 <body>
   <header class="topbar">
@@ -20,6 +20,7 @@
       <label class="cur-month">Mois en cours
         <select id="currentMonth"></select>
       </label>
+      <button class="btn" id="backupBtn" title="Enregistre une copie de toutes vos valeurs dans le navigateur et télécharge un fichier de sauvegarde">Sauvegarder</button>
       <button class="btn ghost" id="themeBtn" title="Changer de thème">◐</button>
     </div>
   </header>
@@ -56,6 +57,7 @@
           <a href="#g-revient">Coût de revient</a>
           <a href="#g-simu">Simulateur d'offre</a>
           <a href="#g-ia">Conseiller IA</a>
+          <a href="#g-sauvegardes">Sauvegardes</a>
           <a href="#g-params">Paramètres &amp; partage</a>
         </nav>
       </div>
@@ -201,6 +203,16 @@
         </ul>
       </div>
 
+      <div class="card" id="g-sauvegardes">
+        <h2>Sauvegardes</h2>
+        <ul>
+          <li><b>Bouton « Sauvegarder »</b> (en haut, visible partout) : enregistre une copie datée de toutes vos valeurs dans le navigateur <b>et</b> télécharge un fichier <code>.json</code> dans vos Téléchargements. Le fichier est la protection la plus sûre : il reste même si le navigateur est vidé.</li>
+          <li><b>Copies automatiques</b> : une à la première ouverture du site chaque jour, et une juste avant toute opération qui remplace vos données (ouverture d'un lien de partage, import d'un fichier, restauration, réinitialisation).</li>
+          <li><b>Restaurer</b> : dans « Paramètres &amp; partage » → « Sauvegardes », choisissez une copie et cliquez sur Restaurer (vos valeurs actuelles sont d'abord sauvegardées, on peut donc toujours revenir en arrière). Pour un fichier téléchargé : « Importer (.json) ».</li>
+          <li>Les 40 copies les plus récentes sont gardées. L'historique du chat IA et la clé API n'y sont pas inclus.</li>
+        </ul>
+      </div>
+
       <div class="card" id="g-params">
         <h2>Paramètres &amp; partage</h2>
         <ul>
@@ -218,6 +230,6 @@
   <div id="tooltip" class="tooltip" role="status" hidden></div>
   <div id="toast" class="toast" hidden></div>
 
-  <script type="module" src="app.js?v=1.7"></script>
+  <script type="module" src="app.js?v=1.8"></script>
 </body>
 </html>

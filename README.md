@@ -22,6 +22,10 @@ Outil de pilotage pour le jeu d'entreprise « distributeur de bouchons de liège
 
 Tous les paramètres sont modifiables dans l'onglet **Paramètres & partage**.
 
+## Sauvegardes
+
+Bouton **Sauvegarder** (en haut) : copie datée dans le navigateur + fichier `.json` téléchargé. Copies automatiques chaque jour et avant tout import, lien de partage, restauration ou réinitialisation. Restauration dans Paramètres & partage → Sauvegardes.
+
 ## Partage dans le groupe
 
 Les données sont enregistrées dans le navigateur de chacun. Pour synchroniser : **Copier un lien de partage** (les données sont dans le lien) ou **Exporter / Importer** un fichier `.json`.
