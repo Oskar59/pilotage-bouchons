@@ -204,7 +204,8 @@ function compute(s) {
     for (const pr of PRODUITS) {
       const lf = stock[pr].lots - (venteP[pr] || 0);
       if (lf < 0) stockNeg = true;
-      stock[pr] = { lots: lf, val: Math.max(0, lf) * cmupP[pr] };
+      // Un stock négatif (sur-vente) n'est pas reporté : le jeu ne permet pas de livrer plus que le stock
+      stock[pr] = { lots: Math.max(0, lf), val: Math.max(0, lf) * cmupP[pr] };
       finP[pr] = lf; lotsFin += lf; valFin += stock[pr].val;
     }
     const demande = SEGMENTS.reduce((t, sg) => t + n0(m.livraisons?.[sg]?.demande), 0);
@@ -460,7 +461,7 @@ function renderMois(c) {
           <p class="muted small">Stimule la demande <b>de ce mois uniquement</b>. Décaissée ce mois-ci. Inutile si le stock est faible.</p>
         </div>
       </div>
-      <p class="muted small">Coût moyen actuel des agglomérés en stock : <b>${fmtP(cmA)}</b>/lot. Les prix et délais fixés ici servent de valeurs par défaut pour les ventes du mois.</p>
+      <p class="muted small">Coût moyen des agglomérés ce mois-ci : <b>${fmtP(cmA)}</b>/lot${c.rows[i + 1] && Math.abs(c.rows[i + 1].cmupP["Agglomérés"] - cmA) > 0.005 && c.rows[i + 1].dispoP["Agglomérés"] > 0 ? ` → <b>${fmtP(c.rows[i + 1].cmupP["Agglomérés"])}</b> en ${esc(c.rows[i + 1].nom)} après réception des achats` : ""}. Les prix et délais fixés ici servent de valeurs par défaut pour les ventes du mois.</p>
     </div>
 
     <h2 class="section-gap phase nego">Phase de négociation</h2>
@@ -492,7 +493,7 @@ function renderMois(c) {
 
     <div class="card">
       <div class="row between"><h2>Étape B · Négociations (stock du mois prochain)</h2><button class="btn" data-add="achats">+ Ajouter un achat</button></div>
-      <p class="muted small">Livraison industriel → distributeur : <b>30 jours</b> (le stock arrive le mois suivant). Distributeur → distributeur : instantané. Prix marché de référence agglomérés : ${fmtP(n0(state.params.prixMarche))}/lot. Dans le jeu, les agglomérés sont sous « Bouchons triés ». Seules les offres <b>validées</b> comptent dans les calculs ; une offre acceptée des deux côtés est irréversible.</p>
+      <p class="muted small">Livraison industriel → distributeur : <b>30 jours</b> (le stock arrive le mois suivant). Distributeur → distributeur : instantané. Prix marché de référence agglomérés : ${fmtP(n0(state.params.prixMarche))}/lot.${c.rows[i + 1] && r.cmdLots ? ` Coût moyen des agglomérés en ${esc(c.rows[i + 1].nom)} après réception : <b>${fmtP(c.rows[i + 1].cmupP["Agglomérés"])}</b> (aujourd'hui ${fmtP(r.cmupP["Agglomérés"])}).` : ""} Dans le jeu, les agglomérés sont sous « Bouchons triés ». Seules les offres <b>validées</b> comptent dans les calculs ; une offre acceptée des deux côtés est irréversible.</p>
       <div class="table-wrap"><table>
         <thead><tr><th>Statut</th><th>Fournisseur</th><th>Produit</th><th class="r">Lots</th><th class="r">Prix/lot</th><th>Livraison</th><th>Paiement</th><th>Transport</th><th class="r">Coût transp. (€)</th><th class="r">Total</th><th></th></tr></thead>
         <tbody>${m.achats.length ? m.achats.map((a, j) => `<tr class="${(a.statut || "validee") === "validee" ? "" : "inactive"}">
@@ -571,7 +572,7 @@ function renderStock(c) {
   el.innerHTML = `
     <div class="grid k4">
       <div class="card kpi"><div class="label">Stock fin ${esc(cur.nom)}</div><div class="value">${fmtN(cur.lotsFin)} lots</div><div class="hint">+ ${fmtN(cur.transit)} en transit</div></div>
-      <div class="card kpi"><div class="label">Coût moyen agglomérés</div><div class="value">${fmtP(cur.cmup)}</div><div class="hint">marché ≈ ${fmtP(n0(state.params.prixMarche))}</div></div>
+      <div class="card kpi"><div class="label">Coût moyen agglomérés</div><div class="value">${fmtP(cur.cmup)}</div><div class="hint">${(() => { const nx = c.rows[state.currentMonth + 1]; return nx && nx.dispoP["Agglomérés"] > 0 && Math.abs(nx.cmupP["Agglomérés"] - cur.cmup) > 0.005 ? `→ ${fmtP(nx.cmupP["Agglomérés"])} en ${esc(nx.nom)} après réception · ` : ""; })()}marché ≈ ${fmtP(n0(state.params.prixMarche))}</div></div>
       <div class="card kpi"><div class="label">Couverture</div><div class="value">${Number.isFinite(couverture) ? couverture.toLocaleString("fr-FR", { maximumFractionDigits: 1 }) + " mois" : "—"}</div><div class="hint">au rythme moyen de ${fmtN(avgVentes)} lots/mois vendus</div></div>
       <div class="card kpi"><div class="label">Coût de stockage du mois</div><div class="value">${fmtE(cur.stockage)}</div><div class="hint">${state.params.stockageRate} % de la valeur du stock</div></div>
     </div>
