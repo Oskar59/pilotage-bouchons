@@ -2,12 +2,15 @@
 // Tout est stocké dans le navigateur (localStorage). Partage via export JSON ou lien.
 
 // Numéro de version affiché dans l'en-tête : à augmenter à chaque mise à jour du site
-const APP_VERSION = "1.8";
+const APP_VERSION = "1.9";
 const APP_DATE = "24/11/2026";
 const STORE_KEY = "pilotage-bouchons-v1";
 const KEY_KEY = "pilotage-bouchons-apikey";
 const BACKUP_KEY = STORE_KEY + "-sauvegardes"; // copies datées, séparées des données
 const BACKUP_MAX = 40;
+const CLOUD_KEY = STORE_KEY + "-cloud";       // { url, key, code, name } : jamais exporté ni dans le lien de partage
+const CLOUD_VER_KEY = STORE_KEY + "-cloudver"; // version du groupe sur laquelle ces données locales sont basées
+let cloudInvited = false;
 const MOIS = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"];
 const PRODUITS = ["Agglomérés", "Q1", "Q2", "Q3", "Q4"];
 const SEGMENTS = ["Vignerons", "Caves", "Négociants"];
@@ -83,6 +86,7 @@ let state = load();
 let ui = {
   tab: "dashboard", editMonth: state.currentMonth, busy: false,
   rev: { mois: null, cle: "ca", marge: 20 },
+  cloudForm: { url: "", key: "", code: "", name: "" }, cloudHist: null,
   simu: { type: "achat", produit: "Agglomérés", segment: "Vignerons", lots: 5000, prix: 21, delai: 1, livraison: 1, transport: "Train", coutTransport: 0, mois: state.currentMonth },
 };
 
@@ -156,8 +160,22 @@ function migrate(s) {
 }
 function save() {
   try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) { /* stockage indisponible */ }
+  if (typeof cloudSchedule === "function") cloudSchedule();
 }
 function readHash() {
+  if (location.hash.startsWith("#cloud=")) {
+    try {
+      const inv = JSON.parse(decodeURIComponent(escape(atob(location.hash.slice(7)))));
+      let old = {}; try { old = JSON.parse(localStorage.getItem(CLOUD_KEY) || "{}"); } catch {}
+      if (inv.url && inv.key && inv.code) {
+        localStorage.setItem(CLOUD_KEY, JSON.stringify({ url: inv.url, key: inv.key, code: inv.code, name: old.name || "" }));
+        if (old.code !== inv.code) localStorage.removeItem(CLOUD_VER_KEY);
+        cloudInvited = true;
+      }
+    } catch (e) { console.warn(e); }
+    history.replaceState(null, "", location.pathname);
+    return null;
+  }
   if (!location.hash.startsWith("#data=")) return null;
   try {
     const json = decodeURIComponent(escape(atob(location.hash.slice(6))));
@@ -452,6 +470,221 @@ function renderRevient(c) {
       </table></div>
       <p class="muted small">Le résultat ici est identique au « résultat du mois » du tableau de bord : CA − coût de revient complet.</p>
     </div>`;
+}
+
+// ---------- synchronisation en ligne (Supabase) ----------
+let cloud = (() => { try { return JSON.parse(localStorage.getItem(CLOUD_KEY) || "null"); } catch { return null; } })();
+let cloudVer = (() => { try { const v = localStorage.getItem(CLOUD_VER_KEY); return v === null ? null : +v; } catch { return null; } })();
+let cloudLastSent = null, cloudTimer = null, cloudBusy = false, cloudReady = false, cloudWaiting = false;
+const cloudOn = () => !!(cloud && cloud.url && cloud.key && cloud.code);
+const cloudData = () => ({ ...state, chat: [] });
+const cloudJson = () => JSON.stringify(cloudData());
+function normUrl(u) {
+  u = String(u || "").trim().replace(/\/+$/, "").replace(/\/rest\/v1$/, "");
+  if (u && !/^https?:\/\//.test(u)) u = "https://" + u;
+  return u;
+}
+function setCloudVer(v) { cloudVer = v; try { localStorage.setItem(CLOUD_VER_KEY, String(v)); } catch {} }
+function cloudStatus(text, kind = "") {
+  const el = document.getElementById("cloudStatus");
+  if (!el) return;
+  el.hidden = !cloudOn() && !text;
+  el.textContent = text;
+  el.className = "version cloud " + kind;
+}
+async function rpc(fn, body, cfg = cloud) {
+  const headers = { apikey: cfg.key, "Content-Type": "application/json" };
+  if (cfg.key.startsWith("eyJ")) headers.Authorization = "Bearer " + cfg.key; // ancienne clé « anon » (JWT)
+  const res = await fetch(`${cfg.url}/rest/v1/rpc/${fn}`, { method: "POST", headers, body: JSON.stringify(body) });
+  const txt = await res.text();
+  if (!res.ok) {
+    let msg = txt; try { const j = JSON.parse(txt); msg = j.message || j.msg || j.error || txt; } catch {}
+    throw new Error(`${res.status} ${msg}`);
+  }
+  return txt ? JSON.parse(txt) : null;
+}
+const hhmm = () => new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+const isEditing = () => { const a = document.activeElement; return !!a && a.closest?.("main") && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName); };
+
+// Remplace les données locales par celles du groupe (le chat IA reste local)
+function applyRemote(data, version) {
+  const chat = state.chat;
+  state = migrate(data);
+  state.chat = chat || [];
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch {}
+  cloudLastSent = cloudJson();
+  setCloudVer(version);
+  ui.editMonth = Math.min(ui.editMonth, state.months.length - 1);
+  ui.simu.mois = Math.min(ui.simu.mois, state.months.length - 1);
+  render();
+}
+
+function cloudSchedule() {
+  if (!cloudOn() || !cloudReady) return;
+  clearTimeout(cloudTimer);
+  cloudTimer = setTimeout(cloudPush, 1200);
+}
+async function cloudPush() {
+  cloudTimer = null;
+  if (!cloudOn() || !cloudReady) return;
+  if (cloudBusy) { cloudSchedule(); return; }
+  const json = cloudJson();
+  if (json === cloudLastSent) return;
+  cloudBusy = true; cloudStatus("Enregistrement…", "busy");
+  try {
+    const r = await rpc("put_state", { p_code: cloud.code, p_data: JSON.parse(json), p_version: cloudVer, p_by: cloud.name || null });
+    if (r.ok) {
+      cloudLastSent = json; setCloudVer(r.version);
+      cloudStatus(`En ligne ✓ ${hhmm()}`, "ok");
+    } else {
+      // Quelqu'un a enregistré entre-temps : on garde ses données, les nôtres vont dans Sauvegardes
+      snapshot("Automatique · vos modifs non envoyées (conflit avec le groupe)", JSON.stringify(state));
+      applyRemote(r.data, r.version);
+      cloudStatus(`En ligne ✓ ${hhmm()}`, "ok");
+      toast(`${r.updated_by || "Un membre"} a modifié en même temps : données du groupe chargées. Vos dernières modifs sont dans Sauvegardes.`);
+    }
+  } catch (e) {
+    console.warn(e); cloudStatus("Hors ligne · non envoyé", "err");
+    setTimeout(cloudSchedule, 15000);
+  } finally { cloudBusy = false; }
+}
+async function cloudPoll() {
+  if (!cloudOn() || !cloudReady || cloudBusy || cloudTimer || document.hidden) return;
+  try {
+    const v = await rpc("get_version", { p_code: cloud.code });
+    if (!v || v.version === cloudVer) { if (!cloudWaiting) cloudStatus(`En ligne ✓`, "ok"); return; }
+    if (isEditing()) { cloudWaiting = true; cloudStatus("Mise à jour du groupe en attente…", "busy"); return; }
+    cloudWaiting = false;
+    const st = await rpc("get_state", { p_code: cloud.code });
+    if (!st || cloudTimer || cloudBusy) return;
+    applyRemote(st.data, st.version);
+    cloudStatus(`En ligne ✓ ${hhmm()}`, "ok");
+    toast(`Données mises à jour par ${st.updated_by || "un membre du groupe"}`);
+  } catch (e) { cloudStatus("Hors ligne", "err"); }
+}
+// Au démarrage ou à la connexion : aligne les données locales sur celles du groupe
+async function cloudStart(askBeforeReplace) {
+  if (!cloudOn()) { cloudStatus(""); return; }
+  cloudReady = false; cloudStatus("Connexion…", "busy");
+  try {
+    const st = await rpc("get_state", { p_code: cloud.code });
+    const local = cloudJson();
+    if (!st) {
+      cloudVer = null; cloudReady = true; cloudLastSent = null;
+      await cloudPush();
+      toast("Vos valeurs actuelles sont maintenant en ligne pour le groupe");
+      return true;
+    }
+    const remote = JSON.stringify({ ...migrate(st.data), chat: [] });
+    if (remote === local) { cloudLastSent = local; setCloudVer(st.version); }
+    else if (st.version === cloudVer) { cloudLastSent = remote; } // modifs faites hors ligne : elles seront envoyées
+    else {
+      if (askBeforeReplace && !confirm(`Des données existent déjà en ligne pour ce code (dernière modif${st.updated_by ? " par " + st.updated_by : ""} le ${fmtDate(st.updated_at)}).\nLes charger à la place de vos valeurs actuelles ? (vos valeurs actuelles sont d'abord sauvegardées)`)) {
+        cloudStatus("Non connecté", "err"); return false;
+      }
+      snapshot("Automatique · avant chargement des données du groupe", JSON.stringify(state));
+      applyRemote(st.data, st.version);
+      if (!askBeforeReplace) toast("Données du groupe chargées");
+    }
+    cloudReady = true;
+    cloudStatus(`En ligne ✓ ${hhmm()}`, "ok");
+    cloudSchedule();
+    return true;
+  } catch (e) {
+    console.warn(e);
+    cloudStatus("Hors ligne", "err");
+    if (askBeforeReplace) alert("Connexion impossible : " + e.message + "\n\nVérifiez l'URL, la clé, et que le script supabase.sql a bien été exécuté.");
+    else setTimeout(() => cloudStart(false), 20000);
+    return false;
+  }
+}
+function newCode() {
+  const a = "abcdefghjkmnpqrstuvwxyz23456789", b = new Uint32Array(16);
+  crypto.getRandomValues(b);
+  return Array.from(b, (x) => a[x % a.length]).join("").replace(/(.{4})(?!$)/g, "$1-");
+}
+function inviteLink() {
+  return location.origin + location.pathname + "#cloud=" + btoa(unescape(encodeURIComponent(JSON.stringify({ url: cloud.url, key: cloud.key, code: cloud.code }))));
+}
+function cloudCardHtml() {
+  const f = ui.cloudForm;
+  if (cloudOn()) return `
+    <div class="card" id="cloudCard">
+      <h2>Synchronisation en ligne (Supabase) <span class="badge good">activée</span></h2>
+      <p class="small">Toutes les modifications sont enregistrées en ligne automatiquement et apparaissent chez les autres membres en une dizaine de secondes. Code d'équipe : <code>${esc(cloud.code)}</code>${cloud.name ? ` · vous êtes <b>${esc(cloud.name)}</b>` : ""}.</p>
+      <div class="row">
+        <button class="btn" id="cloudInvite">Copier le lien d'invitation</button>
+        <button class="btn ghost" id="cloudHist">Historique en ligne</button>
+        <button class="btn ghost" id="cloudSyncNow">Synchroniser maintenant</button>
+        <button class="btn danger" id="cloudOff" style="padding:7px 14px">Déconnecter cet appareil</button>
+      </div>
+      <label class="field section-gap" style="max-width:280px">Votre prénom (affiché aux autres)<input type="text" data-cloudname value="${esc(cloud.name || "")}"></label>
+      <p class="muted small">Le lien d'invitation donne accès aux données de l'équipe : ne l'envoyez qu'au groupe. ${ui.cloudHist ? "" : "L'historique en ligne garde une copie au plus toutes les 10 minutes (300 copies)."}</p>
+      ${ui.cloudHist ? (ui.cloudHist.length ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Par</th><th class="r">Version</th><th></th></tr></thead><tbody>
+        ${ui.cloudHist.map((h) => `<tr><td>${fmtDate(h.saved_at)}</td><td>${esc(h.saved_by || "—")}</td><td class="r">${h.version}</td><td class="r"><button class="btn ghost" data-cloudrestore="${h.id}">Restaurer</button></td></tr>`).join("")}
+      </tbody></table></div>` : `<p class="muted">Historique vide pour l'instant.</p>`) : ""}
+    </div>`;
+  return `
+    <div class="card" id="cloudCard">
+      <h2>Synchronisation en ligne (Supabase)</h2>
+      <p class="small">Pour que tout le groupe travaille sur les mêmes données en direct. Si un membre vous a envoyé un <b>lien d'invitation</b>, ouvrez-le simplement : rien à remplir ici. Sinon (première configuration), suivez la section « Synchronisation en ligne » du Guide.</p>
+      <div class="form-grid">
+        <label class="field">URL du projet Supabase<input type="text" data-cloudf="url" placeholder="https://xxxx.supabase.co" value="${esc(f.url)}"></label>
+        <label class="field">Clé publique (anon / publishable)<input type="text" data-cloudf="key" placeholder="eyJ… ou sb_publishable_…" value="${esc(f.key)}"></label>
+        <label class="field">Code d'équipe (secret)<input type="text" data-cloudf="code" value="${esc(f.code)}"></label>
+        <label class="field">Votre prénom<input type="text" data-cloudf="name" value="${esc(f.name)}"></label>
+      </div>
+      <div class="row section-gap">
+        <button class="btn ghost" id="cloudGen">Générer un code d'équipe</button>
+        <button class="btn" id="cloudConnect">Connecter</button>
+      </div>
+      <p class="muted small">Si aucune donnée n'existe encore pour ce code, vos valeurs actuelles sont envoyées en ligne. Si des données existent, le site vous demande avant de les charger (vos valeurs sont d'abord sauvegardées).</p>
+    </div>`;
+}
+async function cloudClick(id, t) {
+  switch (id) {
+    case "cloudGen": ui.cloudForm.code = newCode(); renderParams(); return true;
+    case "cloudConnect": {
+      const f = ui.cloudForm;
+      const cfg = { url: normUrl(f.url), key: String(f.key || "").trim(), code: String(f.code || "").trim(), name: String(f.name || "").trim() };
+      if (!cfg.url || !cfg.key) { alert("Renseignez l'URL du projet et la clé publique."); return true; }
+      if (cfg.code.length < 8) { alert("Le code d'équipe doit faire au moins 8 caractères (utilisez « Générer un code d'équipe »)."); return true; }
+      cloud = cfg; try { localStorage.setItem(CLOUD_KEY, JSON.stringify(cloud)); } catch {}
+      cloudVer = null; try { localStorage.removeItem(CLOUD_VER_KEY); } catch {}
+      const ok = await cloudStart(true);
+      if (!ok) { cloud = null; try { localStorage.removeItem(CLOUD_KEY); } catch {} cloudStatus(""); }
+      renderParams();
+      return true;
+    }
+    case "cloudInvite": {
+      const url = inviteLink();
+      navigator.clipboard?.writeText(url).then(() => toast("Lien d'invitation copié : envoyez-le au groupe"), () => prompt("Copiez ce lien :", url));
+      return true;
+    }
+    case "cloudSyncNow": await cloudPush(); await cloudPoll(); return true;
+    case "cloudHist": {
+      try { ui.cloudHist = await rpc("get_history", { p_code: cloud.code }); } catch (e) { toast("Historique indisponible : " + e.message); }
+      renderParams(); return true;
+    }
+    case "cloudOff": {
+      if (!confirm("Déconnecter cet appareil de la synchronisation ? Les données restent dans ce navigateur et en ligne.")) return true;
+      cloud = null; cloudReady = false; ui.cloudHist = null;
+      try { localStorage.removeItem(CLOUD_KEY); localStorage.removeItem(CLOUD_VER_KEY); } catch {}
+      cloudStatus(""); renderParams(); return true;
+    }
+  }
+  if (t.dataset.cloudrestore !== undefined) {
+    try {
+      const h = await rpc("get_history_item", { p_code: cloud.code, p_id: +t.dataset.cloudrestore });
+      if (h && confirm(`Remettre les données du ${fmtDate(h.saved_at)} pour tout le groupe ?\n(Les valeurs actuelles restent dans l'historique et dans Sauvegardes.)`)) {
+        snapshot("Automatique · avant restauration de l'historique en ligne", JSON.stringify(state));
+        const chat = state.chat; state = migrate(h.data); state.chat = chat || [];
+        ui.editMonth = state.currentMonth; save(); render(); toast("Version restaurée pour le groupe");
+      }
+    } catch (e) { toast("Restauration impossible : " + e.message); }
+    return true;
+  }
+  return false;
 }
 
 // ---------- rendu ----------
@@ -1064,7 +1297,7 @@ function renderParams() {
   const el = document.getElementById("tab-params");
   const p = state.params, si = state.stockInitial;
   const f = (path, label, v, step = "1") => `<label class="field">${label}<input type="number" step="${step}" data-param="${path}" value="${esc(v)}"></label>`;
-  el.innerHTML = `
+  el.innerHTML = cloudCardHtml() + `
     <div class="card">
       <h2>Paramètres du jeu</h2>
       <div class="form-grid">
@@ -1154,6 +1387,7 @@ document.addEventListener("click", (e) => {
   }
   if (t.dataset.del) { state.months[ui.editMonth][t.dataset.del].splice(+t.dataset.j, 1); save(); render(); return; }
   if (t.dataset.q) { const ci = document.getElementById("chatInput"); if (ci) { ci.value = t.dataset.q; ci.focus(); } return; }
+  if (/^cloud/.test(t.id) || t.dataset.cloudrestore !== undefined) { cloudClick(t.id, t); return; }
   if (t.dataset.restore !== undefined) {
     const b = listBackups()[+t.dataset.restore];
     if (b && confirm(`Remplacer les valeurs actuelles par la sauvegarde du ${fmtDate(b.date)} ?\n(Les valeurs actuelles sont d'abord sauvegardées.)`)) {
@@ -1284,6 +1518,8 @@ document.addEventListener("change", (e) => {
 
 document.addEventListener("input", (e) => {
   const t = e.target;
+  if (t.dataset.cloudf) { ui.cloudForm[t.dataset.cloudf] = t.value; return; }
+  if (t.dataset.cloudname !== undefined && cloud) { cloud.name = t.value.trim(); try { localStorage.setItem(CLOUD_KEY, JSON.stringify(cloud)); } catch {} return; }
   if (t.dataset.note) { state.months[+t.dataset.m][t.dataset.note] = t.value; save(); return; }
   if (t.id === "rules") { state.rules = t.value; save(); return; }
   if (t.dataset.rev) {
@@ -1322,3 +1558,7 @@ document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.
 document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("active", p.id === "tab-" + ui.tab));
 save();
 render();
+cloudStart(false).then(() => { if (cloudInvited && cloudOn()) { toast("Connecté aux données du groupe"); if (!cloud.name) setTimeout(() => { const n = prompt("Votre prénom (affiché aux autres membres quand vous modifiez) :"); if (n) { cloud.name = n.trim(); try { localStorage.setItem(CLOUD_KEY, JSON.stringify(cloud)); } catch {} renderParams(); } }, 600); } });
+setInterval(cloudPoll, 10000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) cloudPoll(); });
+document.addEventListener("focusout", () => { if (cloudWaiting) setTimeout(cloudPoll, 300); });

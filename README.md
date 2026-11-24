@@ -22,6 +22,15 @@ Outil de pilotage pour le jeu d'entreprise « distributeur de bouchons de liège
 
 Tous les paramètres sont modifiables dans l'onglet **Paramètres & partage**.
 
+## Synchronisation en ligne (Supabase)
+
+1. Créer un projet sur supabase.com.
+2. SQL Editor → coller le contenu de [`supabase.sql`](supabase.sql) → Run.
+3. Sur le site : Paramètres & partage → Synchronisation en ligne → URL du projet + clé publique (anon / publishable) → Générer un code d'équipe → Connecter.
+4. « Copier le lien d'invitation » et l'envoyer au groupe.
+
+Les données ne sont accessibles qu'avec le code d'équipe (fonctions `security definer`, tables fermées à l'accès direct). Historique en ligne : une copie toutes les 10 min au plus.
+
 ## Sauvegardes
 
 Bouton **Sauvegarder** (en haut) : copie datée dans le navigateur + fichier `.json` téléchargé. Copies automatiques chaque jour et avant tout import, lien de partage, restauration ou réinitialisation. Restauration dans Paramètres & partage → Sauvegardes.
