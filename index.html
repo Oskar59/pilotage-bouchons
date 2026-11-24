@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pilotage Bouchons</title>
+  <meta name="description" content="Suivi de trésorerie, de stock et conseiller stratégique pour le jeu d'entreprise (distributeur de bouchons de liège).">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">◉</span>
+      <div>
+        <h1>Pilotage Bouchons</h1>
+        <p class="sub">Distributeur de bouchons de liège · jeu d'entreprise</p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <label class="cur-month">Mois en cours
+        <select id="currentMonth"></select>
+      </label>
+      <button class="btn ghost" id="themeBtn" title="Changer de thème">◐</button>
+    </div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-tab="dashboard">Tableau de bord</button>
+    <button class="tab" data-tab="mois">Saisie du mois</button>
+    <button class="tab" data-tab="stock">Stock</button>
+    <button class="tab" data-tab="simu">Simulateur d'offre</button>
+    <button class="tab" data-tab="ia">Conseiller IA</button>
+    <button class="tab" data-tab="params">Paramètres &amp; partage</button>
+  </nav>
+
+  <main>
+    <section id="tab-dashboard" class="panel active"></section>
+    <section id="tab-mois" class="panel"></section>
+    <section id="tab-stock" class="panel"></section>
+    <section id="tab-simu" class="panel"></section>
+    <section id="tab-ia" class="panel"></section>
+    <section id="tab-params" class="panel"></section>
+  </main>
+
+  <div id="tooltip" class="tooltip" role="status" hidden></div>
+  <div id="toast" class="toast" hidden></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
