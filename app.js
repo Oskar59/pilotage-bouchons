@@ -7,7 +7,8 @@ const MOIS = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", 
 const PRODUITS = ["Agglomérés", "Q1", "Q2", "Q3", "Q4"];
 const SEGMENTS = ["Vignerons", "Caves", "Négociants"];
 const SEG_LABEL = { Vignerons: "Vignerons", Caves: "Caves", "Négociants": "Négociants / Grands comptes" };
-const DELAIS = ["À la commande", "30 jours", "60 jours", "90 jours"];
+const DELAIS = ["Comptant", "30 jours", "60 jours"];
+const STATUTS = [["Validée (comptée)", "validee"], ["En négociation", "nego"], ["Refusée / annulée", "refusee"]];
 const LIVRAISONS = [["Instantané (distributeur)", 0], ["30 jours (industriel)", 1], ["60 jours", 2]];
 const TRANSPORTS = {
   Train: { score: 1, label: "Peu polluant", cls: "good" },
@@ -23,14 +24,21 @@ const DEFAULT_PRIX_CLIENTS = {
 
 const RULES_PLANIF = `
 Phase de planification (chaque mois) — « Positionnement Marketing » :
-- Pour chaque segment client (Vignerons, Caves, Négociants / Grands comptes) on fixe un prix des Agglomérés (€/lot) et un délai de paiement (« À la commande » ou plus).
-- On fixe aussi un budget « Publicité Produits » Agglomérés (€).
+- Pour chaque segment client (Vignerons, Caves, Négociants / Grands comptes) on fixe un prix des Agglomérés (€/lot) et un délai de paiement (comptant, 30 jours ou 60 jours). Un prix hors fourchette est ramené automatiquement au plancher ou au plafond.
+- On fixe aussi un budget « Publicité Produits » Agglomérés (€) : il stimule la demande uniquement sur le mois en cours.
 Fourchettes de prix clients (€/lot, min–max) :
 - Vignerons : Q1 160–200, Q2 140–180, Q3 120–160, Q4 100–140, Agglomérés 40–80
 - Caves : Q1 145–170, Q2 125–150, Q3 105–130, Q4 85–110, Agglomérés 25–50
 - Négociants / Grands comptes : Q1 130–150, Q2 110–130, Q3 90–110, Q4 70–90, Agglomérés 10–30
 Délais de livraison : Industriel → Distributeur 30 jours ; Distributeur → Distributeur instantané ; Distributeur → Client final 30 jours.
 Délais de paiement : à négocier à tous les niveaux (industriel, distributeur, client final).`;
+
+const RULES_DISTRIB = `
+Fonctionnement du rôle de distributeur :
+- Phase 2 (négociation), étape A « Ventes » : le jeu affiche la quantité commandée par chaque segment suite aux réglages de la phase 1. Si le stock couvre la demande, tout est livré. En pénurie, on répartit soi-même les lots livrés (sans dépasser la demande de chaque client) ; toute demande non honorée est perdue et part chez les concurrents.
+- Étape B « Négociations » : les achats faits ce mois-ci n'arrivent en stock qu'au début du mois suivant. On estime les besoins à partir des commandes observées à l'étape A.
+- Proposition d'achat : fournisseur industriel, délai de paiement (comptant, 30 ou 60 jours), produit (les agglomérés sont sous « Bouchons triés »), quantité et prix unitaire ; plusieurs lignes possibles dans un devis (ex. volume principal + volume additionnel à prix réduit).
+- Une offre acceptée par les deux parties est irréversible ; on peut annuler tant qu'elle n'est pas acceptée. Mieux vaut négocier avec l'industriel avant d'envoyer l'offre officielle.`;
 
 const DEFAULT_RULES = `Distributeur de bouchons de liège.
 - Capital de départ : 500 000 €
@@ -43,11 +51,14 @@ const DEFAULT_RULES = `Distributeur de bouchons de liège.
 - Fournisseur historique allemand : STECKER (offres reçues automatiquement en négociation)
 - Chaque mois : une phase de planification puis une phase de négociation (négociations + ventes).
 - Objectif : être la meilleure entreprise sans jamais avoir une trésorerie négative.
-${RULES_PLANIF}`;
+${RULES_PLANIF}
+${RULES_DISTRIB}`;
 
 const uid = () => Math.random().toString(36).slice(2, 9);
+const n0 = (v) => (Number.isFinite(+v) ? +v : 0);
 const emptyMarketing = () => ({ Vignerons: { prix: 0, delai: 0 }, Caves: { prix: 0, delai: 0 }, "Négociants": { prix: 0, delai: 0 }, pub: 0 });
-const emptyMonth = (nom) => ({ nom, marketing: emptyMarketing(), achats: [], ventes: [], depenses: [], planif: "", nego: "" });
+const emptyLivraisons = () => Object.fromEntries(SEGMENTS.map((s) => [s, { demande: 0, livre: 0 }]));
+const emptyMonth = (nom) => ({ nom, marketing: emptyMarketing(), livraisons: emptyLivraisons(), achats: [], ventes: [], depenses: [], planif: "", nego: "" });
 
 function defaultState() {
   return {
@@ -97,10 +108,14 @@ function migrate(s) {
   out.months = (s.months || d.months).map((m) => ({
     ...emptyMonth(m.nom), ...m,
     marketing: { ...emptyMarketing(), ...(m.marketing || {}) },
-    achats: (m.achats || []).map((a) => ({ livraison: 1, ...a, produit: normProduit(a.produit) })),
-    ventes: (m.ventes || []).map((v) => ({ segment: SEGMENTS.includes(v.segment) ? v.segment : "Vignerons", ...v, produit: normProduit(v.produit) })),
+    livraisons: { ...emptyLivraisons(), ...(m.livraisons || {}) },
+    achats: (m.achats || []).map((a) => ({ livraison: 1, statut: "validee", ...a, produit: normProduit(a.produit), delai: Math.min(2, n0(a.delai)) })),
+    ventes: (m.ventes || []).map((v) => ({ segment: SEGMENTS.includes(v.segment) ? v.segment : "Vignerons", ...v, produit: normProduit(v.produit), delai: Math.min(2, n0(v.delai)) })),
   }));
+  out.months.forEach((m) => SEGMENTS.forEach((sg) => { m.marketing[sg].delai = Math.min(2, n0(m.marketing[sg].delai)); }));
   if (out.rules && !out.rules.includes("Positionnement Marketing")) out.rules += "\n" + RULES_PLANIF;
+  if (out.rules && !out.rules.includes("rôle de distributeur")) out.rules += "\n" + RULES_DISTRIB;
+  out.rules = out.rules.replace("(« À la commande » ou plus)", "(comptant, 30 jours ou 60 jours)");
   out.version = 2;
   return out;
 }
@@ -119,8 +134,22 @@ function readHash() {
 }
 
 // ---------- calculs ----------
-const n0 = (v) => (Number.isFinite(+v) ? +v : 0);
 const range = (seg, prod) => state.prixClients?.[seg]?.[prod] || null;
+// Prix effectif comme dans le jeu : ramené dans la fourchette (0 = non saisi → plancher)
+function clampPrix(seg, prod, prix) {
+  const r = range(seg, prod);
+  if (!r) return n0(prix);
+  return Math.min(r[1], Math.max(r[0], n0(prix)));
+}
+// Lignes de vente effectives d'un mois : livraisons par segment (agglomérés) + autres ventes
+function ventesDuMois(m) {
+  const seg = SEGMENTS.map((sg) => ({
+    segment: sg, client: SEG_LABEL[sg], produit: "Agglomérés", lots: n0(m.livraisons?.[sg]?.livre),
+    prix: clampPrix(sg, "Agglomérés", m.marketing[sg].prix), delai: n0(m.marketing[sg].delai), transport: "", coutTransport: 0, auto: true,
+  })).filter((v) => v.lots > 0);
+  return [...seg, ...m.ventes];
+}
+const achatsValides = (m) => m.achats.filter((a) => (a.statut || "validee") === "validee");
 
 function compute(s) {
   const p = s.params;
@@ -142,7 +171,7 @@ function compute(s) {
     const lotsDebut = PRODUITS.reduce((t, pr) => t + stock[pr].lots, 0);
     let cmdLots = 0, cmdVal = 0, transport = 0;
     const rse = {};
-    for (const a of m.achats) {
+    for (const a of achatsValides(m)) {
       const l = n0(a.lots), pr = n0(a.prix), prod = normProduit(a.produit);
       cmdLots += l; cmdVal += l * pr; transport += n0(a.coutTransport);
       decAch[i + n0(a.delai)] += l * pr;
@@ -161,7 +190,7 @@ function compute(s) {
     for (const pr of PRODUITS) { dispoP[pr] = stock[pr].lots; cmupP[pr] = stock[pr].lots > 0 ? stock[pr].val / stock[pr].lots : 0; }
     let venLots = 0, ca = 0, coutVentes = 0;
     const venteP = {};
-    for (const v of m.ventes) {
+    for (const v of ventesDuMois(m)) {
       const l = n0(v.lots), pr = n0(v.prix), prod = normProduit(v.produit);
       venLots += l; ca += l * pr; coutVentes += l * cmupP[prod];
       venteP[prod] = (venteP[prod] || 0) + l;
@@ -178,6 +207,8 @@ function compute(s) {
       stock[pr] = { lots: lf, val: Math.max(0, lf) * cmupP[pr] };
       finP[pr] = lf; lotsFin += lf; valFin += stock[pr].val;
     }
+    const demande = SEGMENTS.reduce((t, sg) => t + n0(m.livraisons?.[sg]?.demande), 0);
+    const perdue = SEGMENTS.reduce((t, sg) => t + Math.max(0, n0(m.livraisons?.[sg]?.demande) - n0(m.livraisons?.[sg]?.livre)), 0);
     let transit = 0;
     for (let k = i + 1; k < H; k++) for (const a of Object.values(arrivals[k])) transit += a.lots;
     const stockage = valFin * n0(p.stockageRate) / 100;
@@ -192,7 +223,7 @@ function compute(s) {
     rows.push({
       i, nom: m.nom, tresoDebut, encaissements: enc[i], paiementsAchats: decAch[i], fixes, stockage, transport, divers, pub,
       decaissements: decaiss, tresoFin, cmdLots, cmdVal, recLots, recVal, venLots, ca, coutVentes, lotsDebut, lotsFin, valFin, transit,
-      cmup: cmupP["Agglomérés"], cmupP, dispoP, finP, venteP, resultat, cumRes, marge: ca - coutVentes, rse, stockNeg,
+      demande, perdue, cmup: cmupP["Agglomérés"], cmupP, dispoP, finP, venteP, resultat, cumRes, marge: ca - coutVentes, rse, stockNeg,
     });
     treso = tresoFin;
   }
@@ -207,8 +238,8 @@ function compute(s) {
 function rseSummary(s) {
   const tot = {};
   s.months.forEach((m) => {
-    m.achats.forEach((a) => { tot[a.transport] = (tot[a.transport] || 0) + n0(a.lots); });
-    m.ventes.forEach((v) => { if (v.transport) tot[v.transport] = (tot[v.transport] || 0) + n0(v.lots); });
+    achatsValides(m).forEach((a) => { tot[a.transport] = (tot[a.transport] || 0) + n0(a.lots); });
+    ventesDuMois(m).forEach((v) => { if (v.transport) tot[v.transport] = (tot[v.transport] || 0) + n0(v.lots); });
   });
   let lots = 0, w = 0;
   for (const [k, l] of Object.entries(tot)) { if (TRANSPORTS[k]) { lots += l; w += l * TRANSPORTS[k].score; } }
@@ -414,7 +445,7 @@ function renderMois(c) {
       <div class="seg-grid">
         ${SEGMENTS.map((s) => {
           const mk = m.marketing[s]; const rg = range(s, "Agglomérés");
-          const marge = n0(mk.prix) ? n0(mk.prix) - cmA : null;
+          const marge = n0(mk.prix) ? clampPrix(s, "Agglomérés", mk.prix) - cmA : null;
           return `<div class="seg">
             <h3>${SEG_LABEL[s]}</h3>
             <label class="field">Prix Agglomérés (€/lot)<input type="number" step="0.5" data-mk="${s}" data-mkk="prix" data-m="${i}" value="${esc(mk.prix)}"></label>
@@ -426,7 +457,7 @@ function renderMois(c) {
         <div class="seg">
           <h3>Publicité produits</h3>
           <label class="field">Publicité Agglomérés (€)<input type="number" step="100" data-mk="pub" data-m="${i}" value="${esc(m.marketing.pub)}"></label>
-          <p class="muted small">Décaissée ce mois-ci, comptée en charge.</p>
+          <p class="muted small">Stimule la demande <b>de ce mois uniquement</b>. Décaissée ce mois-ci. Inutile si le stock est faible.</p>
         </div>
       </div>
       <p class="muted small">Coût moyen actuel des agglomérés en stock : <b>${fmtP(cmA)}</b>/lot. Les prix et délais fixés ici servent de valeurs par défaut pour les ventes du mois.</p>
@@ -434,11 +465,38 @@ function renderMois(c) {
 
     <h2 class="section-gap phase nego">Phase de négociation</h2>
     <div class="card">
-      <div class="row between"><h2>Négociations · achats fournisseurs</h2><button class="btn" data-add="achats">+ Ajouter un achat</button></div>
-      <p class="muted small">Livraison industriel → distributeur : <b>30 jours</b> (le stock arrive le mois suivant). Distributeur → distributeur : instantané. Prix marché de référence agglomérés : ${fmtP(n0(state.params.prixMarche))}/lot.</p>
+      <div class="row between"><h2>Étape A · Répartir les livraisons (agglomérés)</h2><button class="btn ghost" id="autoAlloc">Répartir automatiquement</button></div>
+      <p class="muted small">Recopiez le tableau « Quantité de produits commandés par les clients » du jeu. Stock vendable ce mois : <b>${fmtN(r.dispoP["Agglomérés"])}</b> lots d'agglomérés (coût ${fmtP(r.cmupP["Agglomérés"])}). Prix et délai = ceux de la planification (ramenés dans la fourchette).</p>
+      ${(() => {
+        const dem = SEGMENTS.reduce((t, sg) => t + n0(m.livraisons[sg].demande), 0);
+        const liv = SEGMENTS.reduce((t, sg) => t + n0(m.livraisons[sg].livre), 0);
+        const dispo = r.dispoP["Agglomérés"];
+        const al = !dem ? "" : dem <= dispo ? `<div class="alert good"><span class="ico">✓</span><span>Stock suffisant : vous pouvez livrer toute la demande (${fmtN(dem)} lots).</span></div>`
+          : `<div class="alert crit"><span class="ico">⚠</span><span><b>Pénurie</b> : demande ${fmtN(dem)} lots pour ${fmtN(dispo)} en stock. ${fmtN(dem - dispo)} lots seront perdus au profit des concurrents. Priorisez les segments les plus rentables (bouton « Répartir automatiquement »).</span></div>`;
+        const over = liv > dispo ? `<div class="alert crit"><span class="ico">⚠</span><span>Vous livrez ${fmtN(liv)} lots mais n'en avez que ${fmtN(dispo)}.</span></div>` : "";
+        return al + over;
+      })()}
       <div class="table-wrap"><table>
-        <thead><tr><th>Fournisseur</th><th>Produit</th><th class="r">Lots</th><th class="r">Prix/lot</th><th>Livraison</th><th>Paiement</th><th>Transport</th><th class="r">Coût transp. (€)</th><th class="r">Total</th><th></th></tr></thead>
-        <tbody>${m.achats.length ? m.achats.map((a, j) => `<tr>
+        <thead><tr><th>Segment</th><th class="r">Prix effectif</th><th>Paiement</th><th class="r">Demande</th><th class="r">Livré</th><th class="r">Perdu</th><th class="r">CA</th><th class="r">Marge</th></tr></thead>
+        <tbody>${SEGMENTS.map((sg) => {
+          const lv = m.livraisons[sg], pe = clampPrix(sg, "Agglomérés", m.marketing[sg].prix);
+          const perdu = Math.max(0, n0(lv.demande) - n0(lv.livre));
+          const mg = n0(lv.livre) * (pe - r.cmupP["Agglomérés"]);
+          return `<tr><td>${SEG_LABEL[sg]}</td><td class="r">${fmtP(pe)}</td><td>${DELAIS[n0(m.marketing[sg].delai)]}</td>
+            <td class="r"><input type="number" min="0" data-liv="${sg}" data-livk="demande" data-m="${i}" value="${esc(lv.demande)}"></td>
+            <td class="r"><input type="number" min="0" data-liv="${sg}" data-livk="livre" data-m="${i}" value="${esc(lv.livre)}"> ${n0(lv.livre) > n0(lv.demande) ? `<span class="badge crit">&gt; demande</span>` : ""}</td>
+            <td class="r ${perdu ? "neg" : ""}">${fmtN(perdu)}</td><td class="r">${fmtE(n0(lv.livre) * pe)}</td><td class="r ${cls(mg)}">${fmtE(mg)}</td></tr>`;
+        }).join("")}</tbody>
+      </table></div>
+    </div>
+
+    <div class="card">
+      <div class="row between"><h2>Étape B · Négociations (stock du mois prochain)</h2><button class="btn" data-add="achats">+ Ajouter un achat</button></div>
+      <p class="muted small">Livraison industriel → distributeur : <b>30 jours</b> (le stock arrive le mois suivant). Distributeur → distributeur : instantané. Prix marché de référence agglomérés : ${fmtP(n0(state.params.prixMarche))}/lot. Dans le jeu, les agglomérés sont sous « Bouchons triés ». Seules les offres <b>validées</b> comptent dans les calculs ; une offre acceptée des deux côtés est irréversible.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Statut</th><th>Fournisseur</th><th>Produit</th><th class="r">Lots</th><th class="r">Prix/lot</th><th>Livraison</th><th>Paiement</th><th>Transport</th><th class="r">Coût transp. (€)</th><th class="r">Total</th><th></th></tr></thead>
+        <tbody>${m.achats.length ? m.achats.map((a, j) => `<tr class="${(a.statut || "validee") === "validee" ? "" : "inactive"}">
+          <td>${sel("achats", j, "statut", STATUTS, a.statut || "validee")}</td>
           <td>${inp("achats", j, "fournisseur", a.fournisseur, "text")}</td>
           <td>${sel("achats", j, "produit", prodList, a.produit)}</td>
           <td class="r">${inp("achats", j, "lots", a.lots)}</td>
@@ -448,13 +506,13 @@ function renderMois(c) {
           <td>${transportSelect(`data-m="${i}" data-list="achats" data-j="${j}" data-k="transport"`, a.transport)}</td>
           <td class="r">${inp("achats", j, "coutTransport", a.coutTransport, "number", 'class="sm"')}</td>
           <td class="r">${fmtE(n0(a.lots) * n0(a.prix))}</td>
-          <td><button class="btn danger" data-del="achats" data-j="${j}" title="Supprimer">✕</button></td></tr>`).join("") : `<tr><td colspan="10" class="muted">Aucun achat ce mois-ci.</td></tr>`}</tbody>
+          <td><button class="btn danger" data-del="achats" data-j="${j}" title="Supprimer">✕</button></td></tr>`).join("") : `<tr><td colspan="11" class="muted">Aucun achat ce mois-ci.</td></tr>`}</tbody>
       </table></div>
     </div>
 
     <div class="card">
-      <div class="row between"><h2>Ventes clients</h2><button class="btn" data-add="ventes">+ Ajouter une vente</button></div>
-      <p class="muted small">Disponible ce mois-ci : ${PRODUITS.filter((p) => r.dispoP[p] > 0).map((p) => `<b>${fmtN(r.dispoP[p])}</b> ${p} (coût ${fmtP(r.cmupP[p])})`).join(" · ") || "<b>aucun stock</b>"}. Livraison client : 30 jours.</p>
+      <div class="row between"><h2>Autres ventes</h2><button class="btn ghost" data-add="ventes">+ Ajouter une vente</button></div>
+      <p class="muted small">Disponible ce mois-ci : ${PRODUITS.filter((p) => r.dispoP[p] > 0).map((p) => `<b>${fmtN(r.dispoP[p])}</b> ${p} (coût ${fmtP(r.cmupP[p])})`).join(" · ") || "<b>aucun stock</b>"}. Pour les ventes hors tableau ci-dessus (autres produits, revente à un distributeur…).</p>
       <div class="table-wrap"><table>
         <thead><tr><th>Segment</th><th>Client</th><th>Produit</th><th class="r">Lots</th><th class="r">Prix/lot</th><th>Encaissement</th><th>Transport</th><th class="r">Coût transp. (€)</th><th class="r">CA</th><th class="r">Marge</th><th></th></tr></thead>
         <tbody>${m.ventes.length ? m.ventes.map((v, j) => {
@@ -471,7 +529,7 @@ function renderMois(c) {
           <td class="r">${fmtE(n0(v.lots) * n0(v.prix))}</td>
           <td class="r ${cls(mg)}">${fmtE(mg)}</td>
           <td><button class="btn danger" data-del="ventes" data-j="${j}" title="Supprimer">✕</button></td></tr>`;
-        }).join("") : `<tr><td colspan="11" class="muted">Aucune vente ce mois-ci.</td></tr>`}</tbody>
+        }).join("") : `<tr><td colspan="11" class="muted">Aucune autre vente.</td></tr>`}</tbody>
       </table></div>
     </div>
 
@@ -616,7 +674,7 @@ function adviceRules(c) {
   const m = state.months[state.currentMonth];
   const fixes = n0(p.salaires) + n0(p.structure);
   const cmA = cur.cmupP["Agglomérés"] || n0(state.stockInitial.prix);
-  if (c.minTreso < 0) out.push({ cls: "crit", t: `Trésorerie négative prévue en <b>${esc(c.rows[c.minTresoMonth].nom)}</b> (${fmtE(c.minTreso)}). Leviers : négocier des paiements fournisseurs à 30/60 jours, encaisser les clients « à la commande », réduire les achats ou vendre du stock.` });
+  if (c.minTreso < 0) out.push({ cls: "crit", t: `Trésorerie négative prévue en <b>${esc(c.rows[c.minTresoMonth].nom)}</b> (${fmtE(c.minTreso)}). Leviers : négocier des paiements fournisseurs à 30/60 jours, encaisser les clients comptant, réduire les achats ou vendre du stock.` });
   else out.push({ cls: "good", t: `Trésorerie positive sur tout l'horizon (minimum ${fmtE(c.minTreso)} en ${esc(c.rows[c.minTresoMonth].nom)}).` });
 
   const marges = SEGMENTS.map((s) => { const rg = range(s, "Agglomérés"); return { s, rg, min: rg[0] - cmA, max: rg[1] - cmA }; });
@@ -630,13 +688,26 @@ function adviceRules(c) {
     if (pr && (pr < rg[0] || pr > rg[1])) out.push({ cls: "warn", t: `Planification ${esc(m.nom)} : le prix ${SEG_LABEL[s]} (${fmtP(pr)}) est hors fourchette ${rg[0]}–${rg[1]} €.` });
     if (pr && pr <= cmA) out.push({ cls: "crit", t: `Planification ${esc(m.nom)} : prix ${SEG_LABEL[s]} (${fmtP(pr)}) inférieur au coût moyen (${fmtP(cmA)}) → vente à perte.` });
   });
-  if (!SEGMENTS.some((s) => n0(mk[s].prix))) out.push({ cls: "warn", t: `Planification ${esc(m.nom)} : aucun prix fixé. Suggestion de départ : Vignerons ~${Math.round(marges[0].rg[0] + (marges[0].rg[1] - marges[0].rg[0]) * 0.6)} €, Caves ~${Math.round(marges[1].rg[0] + (marges[1].rg[1] - marges[1].rg[0]) * 0.6)} €, Négociants ${Math.round(marges[2].rg[1])} € (ou ne pas cibler), paiement « à la commande » pour protéger la trésorerie.` });
+  if (!SEGMENTS.some((s) => n0(mk[s].prix))) out.push({ cls: "warn", t: `Planification ${esc(m.nom)} : aucun prix fixé. Suggestion de départ : Vignerons ~${Math.round(marges[0].rg[0] + (marges[0].rg[1] - marges[0].rg[0]) * 0.6)} €, Caves ~${Math.round(marges[1].rg[0] + (marges[1].rg[1] - marges[1].rg[0]) * 0.6)} €, Négociants ${Math.round(marges[2].rg[1])} € (ou ne pas cibler), paiement comptant pour protéger la trésorerie.` });
   if (SEGMENTS.some((s) => n0(mk[s].delai) > 0)) out.push({ cls: "info", t: `Vous laissez un délai de paiement à certains clients : c'est plus attractif, mais l'argent rentre plus tard. Vérifiez la trésorerie minimale.` });
 
-  out.push({ cls: "info", t: `Livraison industriel → distributeur en 30 jours : ce que vous achetez en ${esc(m.nom)} n'est vendable qu'en ${esc(state.months[Math.min(state.currentMonth + 1, state.months.length - 1)].nom)}. Achetez un mois à l'avance de vos ventes prévues.` });
+  const dispoA = cur.dispoP["Agglomérés"];
+  const demM = SEGMENTS.reduce((t, sg) => t + n0(m.livraisons[sg].demande), 0);
+  if (cur.perdue > 0) out.push({ cls: "crit", t: `${esc(m.nom)} : <b>${fmtN(cur.perdue)} lots de demande perdus</b> (partis chez les concurrents). Il fallait plus de stock : augmentez vos achats pour le mois prochain.` });
+  if (n0(m.marketing.pub) > 0 && demM > dispoA) out.push({ cls: "warn", t: `Publicité de ${fmtE(n0(m.marketing.pub))} alors que la demande dépasse déjà votre stock : cette pub génère surtout des ventes perdues.` });
+  else if (n0(m.marketing.pub) > 0 && dispoA < 3000) out.push({ cls: "warn", t: `Publicité de ${fmtE(n0(m.marketing.pub))} avec seulement ${fmtN(dispoA)} lots en stock : réduisez-la, elle risque de créer de la demande que vous ne pourrez pas servir.` });
+  if (demM) {
+    const next = c.rows[state.currentMonth + 1];
+    const dejaAttendu = next ? next.recLots : 0;
+    const besoin = Math.max(0, Math.round(demM * 1.1 - Math.max(0, cur.lotsFin) - dejaAttendu));
+    out.push({ cls: "info", t: `Achat conseillé pour ${esc(next?.nom || "le mois prochain")} : demande observée ${fmtN(demM)} lots (+10 % de marge) − stock restant ${fmtN(Math.max(0, cur.lotsFin))} − déjà commandé ${fmtN(dejaAttendu)} ≈ <b>${fmtN(besoin)} lots</b> à négocier. Ajustez selon votre budget pub et vos prix du mois prochain.` });
+  }
+  const enNego = m.achats.filter((a) => a.statut === "nego");
+  if (enNego.length) out.push({ cls: "info", t: `${enNego.length} proposition(s) d'achat en négociation (non comptée(s)). Passez-les en « Validée » une fois acceptées par les deux parties.` });
+  out.push({ cls: "info", t: `Livraison industriel → distributeur en 30 jours : ce que vous achetez en ${esc(m.nom)} n'arrive qu'au début de ${esc(state.months[Math.min(state.currentMonth + 1, state.months.length - 1)].nom)}. Utilisez les commandes observées à l'étape A pour estimer vos besoins.` });
   const si = state.stockInitial;
   if (n0(si.prix) > n0(p.prixMarche)) out.push({ cls: "warn", t: `Le stock de départ a coûté ${fmtP(n0(si.prix))}/lot contre ~${fmtP(n0(p.prixMarche))} sur le marché. Prochains achats : visez ≤ ${fmtP(n0(p.prixMarche))} et mettez STECKER en concurrence.` });
-  if (n0(si.moisPaiement) === 0 && state.currentMonth === 0) out.push({ cls: "warn", t: `Fin janvier, le stock de départ (${fmtE(n0(si.lots) * n0(si.prix))}) + ${fmtE(fixes)} de charges sortent de la trésorerie. Des ventes encaissées « à la commande » dès janvier aident beaucoup.` });
+  if (n0(si.moisPaiement) === 0 && state.currentMonth === 0) out.push({ cls: "warn", t: `Fin janvier, le stock de départ (${fmtE(n0(si.lots) * n0(si.prix))}) + ${fmtE(fixes)} de charges sortent de la trésorerie. Des ventes encaissées comptant dès janvier aident beaucoup.` });
   const dearBuys = [];
   state.months.forEach((mm) => mm.achats.forEach((a) => { if (a.produit === "Agglomérés" && n0(a.prix) > n0(p.prixMarche)) dearBuys.push(`${mm.nom} (${a.fournisseur || "?"} à ${fmtP(n0(a.prix))})`); }));
   if (dearBuys.length) out.push({ cls: "warn", t: `Achats au-dessus du prix marché : ${esc(dearBuys.join(", "))}.` });
@@ -654,7 +725,7 @@ function contextForAI(c) {
   const rows = c.rows.map((r) => ({
     mois: r.nom, tresoDebut: Math.round(r.tresoDebut), encaissements: Math.round(r.encaissements), paiementsFournisseurs: Math.round(r.paiementsAchats),
     chargesFixes: r.fixes, publicite: r.pub, stockage: Math.round(r.stockage), transportEtDivers: Math.round(r.transport + r.divers - r.pub), tresoFin: Math.round(r.tresoFin),
-    lotsCommandes: r.cmdLots, lotsRecus: r.recLots, lotsVendus: r.venLots, stockFinParProduit: Object.fromEntries(PRODUITS.filter((p) => r.finP[p]).map((p) => [p, r.finP[p]])),
+    demandeClients: r.demande, demandePerdue: r.perdue, lotsCommandes: r.cmdLots, lotsRecus: r.recLots, lotsVendus: r.venLots, stockFinParProduit: Object.fromEntries(PRODUITS.filter((p) => r.finP[p]).map((p) => [p, r.finP[p]])),
     enTransit: r.transit, coutMoyenAgglo: +r.cmup.toFixed(2), CA: Math.round(r.ca), resultat: Math.round(r.resultat),
   }));
   const details = state.months.map((m) => ({
@@ -662,11 +733,12 @@ function contextForAI(c) {
     planification: SEGMENTS.some((s) => n0(m.marketing[s].prix)) || n0(m.marketing.pub) ? {
       ...Object.fromEntries(SEGMENTS.map((s) => [s, { prixAgglo: n0(m.marketing[s].prix), delaiPaiement: DELAIS[n0(m.marketing[s].delai)] }])), publicite: n0(m.marketing.pub),
     } : undefined,
-    achats: m.achats.map((a) => ({ fournisseur: a.fournisseur, produit: a.produit, lots: n0(a.lots), prix: n0(a.prix), livraison: LIVRAISONS.find((l) => l[1] === n0(a.livraison))?.[0], paiement: DELAIS[n0(a.delai)], transport: a.transport, coutTransport: n0(a.coutTransport) })),
+    livraisonsParSegment: SEGMENTS.some((sg) => n0(m.livraisons[sg].demande)) ? Object.fromEntries(SEGMENTS.map((sg) => [sg, { demande: n0(m.livraisons[sg].demande), livre: n0(m.livraisons[sg].livre), prixEffectif: clampPrix(sg, "Agglomérés", m.marketing[sg].prix) }])) : undefined,
+    achats: m.achats.map((a) => ({ statut: STATUTS.find((x) => x[1] === (a.statut || "validee"))[0], fournisseur: a.fournisseur, produit: a.produit, lots: n0(a.lots), prix: n0(a.prix), livraison: LIVRAISONS.find((l) => l[1] === n0(a.livraison))?.[0], paiement: DELAIS[n0(a.delai)], transport: a.transport, coutTransport: n0(a.coutTransport) })),
     ventes: m.ventes.map((v) => ({ segment: v.segment, client: v.client, produit: v.produit, lots: n0(v.lots), prix: n0(v.prix), encaissement: DELAIS[n0(v.delai)], transport: v.transport || null })),
     autres: m.depenses.map((d) => ({ libelle: d.libelle, montant: n0(d.montant) })),
     notesPlanification: m.planif || undefined, notesNegociation: m.nego || undefined,
-  })).filter((m) => m.planification || m.achats.length || m.ventes.length || m.autres.length || m.notesPlanification || m.notesNegociation);
+  })).filter((m) => m.planification || m.livraisonsParSegment || m.achats.length || m.ventes.length || m.autres.length || m.notesPlanification || m.notesNegociation);
   return `<etat_entreprise mois_en_cours="${state.months[state.currentMonth].nom}">
 Paramètres : ${JSON.stringify(state.params)}
 Stock initial : ${JSON.stringify(state.stockInitial)}
@@ -691,7 +763,9 @@ Comment répondre :
 - Réponds en français, de façon concrète et chiffrée, à partir des données de l'état de l'entreprise fourni dans chaque message. Fais les calculs (trésorerie, marge par segment, coût moyen, point mort) plutôt que de rester général.
 - Pour la planification : propose un prix précis par segment (dans la fourchette), un délai de paiement et un budget publicité, en expliquant le compromis volume / marge / trésorerie.
 - Pour une offre de négociation : dis s'il faut accepter, refuser ou contre-proposer, avec un prix/volume/délai/transport cible et l'argument à utiliser.
-- Rappelle-toi que les achats chez un industriel arrivent 30 jours plus tard : on ne peut vendre ce mois-ci que le stock déjà présent.
+- Rappelle-toi que les achats chez un industriel arrivent au début du mois suivant : on ne peut vendre ce mois-ci que le stock déjà présent. En pénurie, la demande non servie est perdue au profit des concurrents : aide à prioriser les segments et à dimensionner les achats à partir de la demande observée.
+- La publicité ne stimule la demande que sur le mois en cours : déconseille-la si le stock ne pourra pas suivre.
+- Les délais de paiement possibles sont comptant, 30 jours ou 60 jours. Les prix hors fourchette sont ramenés au plancher/plafond par le jeu.
 - Signale toujours un risque de trésorerie négative et la marge de sécurité restante.
 - Tiens compte de l'impact RSE des transports (train < camion < bateau < avion en pollution) et des frais de stockage (0,33 % de la valeur du stock de fin de mois).
 - S'il te manque une information pour bien conseiller (volumes demandés par segment, effet de la publicité, concurrents…), dis précisément laquelle chercher dans le jeu.
@@ -896,6 +970,14 @@ document.addEventListener("click", (e) => {
     }
     case "forgetKey": try { localStorage.removeItem(KEY_KEY); } catch {} render(); break;
     case "sendChat": askClaude(document.getElementById("chatInput").value); break;
+    case "autoAlloc": {
+      const i = ui.editMonth, m = state.months[i];
+      SEGMENTS.forEach((sg) => { m.livraisons[sg].livre = 0; });
+      let dispo = compute(state).rows[i].dispoP["Agglomérés"] - m.ventes.filter((v) => v.produit === "Agglomérés").reduce((t, v) => t + n0(v.lots), 0);
+      const order = [...SEGMENTS].sort((a, b) => (clampPrix(b, "Agglomérés", m.marketing[b].prix) - n0(m.marketing[b].delai) * 0.5) - (clampPrix(a, "Agglomérés", m.marketing[a].prix) - n0(m.marketing[a].delai) * 0.5));
+      for (const sg of order) { const q = Math.min(n0(m.livraisons[sg].demande), Math.max(0, dispo)); m.livraisons[sg].livre = q; dispo -= q; }
+      save(); render(); toast("Livraisons réparties : segments les mieux payés en priorité"); break;
+    }
     case "clearChat": state.chat = []; save(); render(); break;
     case "simuApply": {
       const s = ui.simu; const m = state.months[s.mois];
@@ -941,7 +1023,22 @@ document.addEventListener("change", (e) => {
   }
   if (t.dataset.mk) {
     const mk = state.months[+t.dataset.m].marketing;
-    if (t.dataset.mk === "pub") mk.pub = n0(t.value); else mk[t.dataset.mk][t.dataset.mkk] = n0(t.value);
+    if (t.dataset.mk === "pub") mk.pub = n0(t.value);
+    else if (t.dataset.mkk === "prix" && n0(t.value)) {
+      const c2 = clampPrix(t.dataset.mk, "Agglomérés", t.value);
+      if (c2 !== n0(t.value)) toast(`Prix ramené à ${c2} € (fourchette du jeu)`);
+      mk[t.dataset.mk].prix = c2;
+    } else mk[t.dataset.mk][t.dataset.mkk] = n0(t.value);
+    save(); render(); return;
+  }
+  if (t.dataset.liv) {
+    const lv = state.months[+t.dataset.m].livraisons[t.dataset.liv];
+    lv[t.dataset.livk] = Math.max(0, n0(t.value));
+    if (t.dataset.livk === "demande") {
+      const c = compute(state); const m = state.months[+t.dataset.m];
+      const dem = SEGMENTS.reduce((s2, sg) => s2 + n0(m.livraisons[sg].demande), 0);
+      if (dem <= c.rows[+t.dataset.m].dispoP["Agglomérés"]) SEGMENTS.forEach((sg) => { m.livraisons[sg].livre = n0(m.livraisons[sg].demande); });
+    }
     save(); render(); return;
   }
   if (t.dataset.pc) {

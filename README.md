@@ -5,7 +5,7 @@ Outil de pilotage pour le jeu d'entreprise « distributeur de bouchons de liège
 ## Fonctionnalités
 
 - **Tableau de bord** : trésorerie fin de mois (réelle + prévision), stock, résultat, alertes de trésorerie négative.
-- **Saisie du mois** : phase de planification (prix et délai de paiement par segment Vignerons / Caves / Négociants, publicité), puis achats fournisseurs (STECKER…), ventes clients, délais de paiement / d'encaissement, transport, autres dépenses, notes de planification et de négociation.
+- **Saisie du mois** : phase de planification (prix ramené dans la fourchette, délai comptant / 30 / 60 jours par segment, publicité), puis étape A « répartir les livraisons » (demande par segment, pénurie, demande perdue, répartition automatique), étape B « négociations » (achats avec statut en négociation / validée / refusée), autres ventes, délais de paiement / d'encaissement, transport, autres dépenses, notes de planification et de négociation.
 - **Stock** : mouvements, coût moyen pondéré (CMUP), couverture, frais de stockage (0,33 %), bilan RSE des transports.
 - **Simulateur d'offre** : tester une offre avant de signer et voir son impact sur la trésorerie de tous les mois suivants.
 - **Conseiller IA** : diagnostic automatique + discussion avec Claude, qui reçoit l'état complet de l'entreprise (une clé API Anthropic est nécessaire, elle reste dans votre navigateur).
