@@ -1,6 +1,9 @@
 // Pilotage Bouchons — suivi trésorerie / stock / stratégie
 // Tout est stocké dans le navigateur (localStorage). Partage via export JSON ou lien.
 
+// Numéro de version affiché dans l'en-tête : à augmenter à chaque mise à jour du site
+const APP_VERSION = "1.6";
+const APP_DATE = "24/11/2026";
 const STORE_KEY = "pilotage-bouchons-v1";
 const KEY_KEY = "pilotage-bouchons-apikey";
 const MOIS = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"];
@@ -1111,6 +1114,8 @@ function toast(msg) {
 }
 
 // init
+const vEl = document.getElementById("appVersion");
+if (vEl) { vEl.textContent = `version ${APP_VERSION} du ${APP_DATE}`; vEl.title = "Si ce numéro est plus ancien que prévu, rechargez la page (Cmd/Ctrl + Maj + R)"; }
 try {
   const th = localStorage.getItem(STORE_KEY + "-theme"); if (th) document.documentElement.dataset.theme = th;
   const tab = localStorage.getItem(STORE_KEY + "-tab"); if (tab) ui.tab = tab;

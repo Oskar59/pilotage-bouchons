@@ -265,3 +265,5 @@ tr.inactive td { opacity: .55; }
 .gtable td { white-space: normal; color: var(--text-2); }
 
 .seuil { font-size: 1.05rem; }
+
+.version { display: inline-block; font-size: .75rem; font-weight: 600; color: var(--accent); background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; padding: 0 8px; }
