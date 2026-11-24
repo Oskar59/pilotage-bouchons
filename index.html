@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Pilotage Bouchons</title>
   <meta name="description" content="Suivi de trésorerie, de stock et conseiller stratégique pour le jeu d'entreprise (distributeur de bouchons de liège).">
-  <link rel="stylesheet" href="style.css?v=1.10">
+  <link rel="stylesheet" href="style.css?v=2.0">
 </head>
 <body>
   <header class="topbar">
@@ -56,6 +56,7 @@
           <a href="#g-stock">Stock</a>
           <a href="#g-revient">Coût de revient</a>
           <a href="#g-simu">Simulateur d'offre</a>
+          <a href="#g-aides">Aides à la décision</a>
           <a href="#g-ia">Conseiller IA</a>
           <a href="#g-cloud">Synchronisation en ligne</a>
           <a href="#g-sauvegardes">Sauvegardes</a>
@@ -195,12 +196,28 @@
         </ul>
       </div>
 
+      <div class="card" id="g-aides">
+        <h2>Aides à la décision</h2>
+        <table class="gtable"><tbody>
+          <tr><th>Alerte de commande</th><td>Tableau de bord, Diagnostic et étape B. Elle apparaît quand le stock du mois prochain (stock restant + achats validés qui arrivent) est inférieur à la demande attendue + 10 %. <i>Demande attendue</i> = moyenne des 3 derniers mois où une demande a été saisie. Comme un industriel livre en 30 jours, c'est <b>ce mois-ci</b> qu'il faut négocier.</td></tr>
+          <tr><th>Aide au choix des prix</th><td>Saisie du mois, sous la planification. Pour chaque segment, trois prix (bas, milieu, haut de la fourchette), la demande estimée et la marge sur coût d'achat (demande × (prix − coût moyen)). La demande est estimée par une droite prix → demande tirée de vos mois passés (au moins 2 prix différents), sinon on reprend la dernière demande observée. Le prix qui donne la plus grosse marge est marqué « conseillé ». <b>Appliquer les prix conseillés</b> les recopie dans la planification (après confirmation). L'estimation ne tient pas compte de la pub ni des concurrents.</td></tr>
+          <tr><th>Prévu / réalisé</th><td>Saisie du mois. « Figer la prévision » enregistre une photo des chiffres attendus (demande et CA estimés avec vos prix, lots vendables, résultat estimé). Les valeurs prévues sont modifiables. Le réalisé se remplit quand vous saisissez la demande et les ventes ; l'écart montre où la prévision s'est trompée.</td></tr>
+          <tr><th>Jusqu'où négocier ?</th><td>Simulateur d'offre, type « Achat ». <i>Prix max pour X % de marge</i> = prix de vente moyen attendu × (1 − X %) − charges par lot. <i>Prix max à l'équilibre</i> = prix de vente moyen − charges par lot. Prix de vente moyen = vos prix planifiés (sinon milieu de fourchette) pondérés par la dernière demande de chaque segment. Charges par lot = (salaires + structure + stockage + pub + autres du mois) ÷ demande attendue. <i>Lots max</i> = plus grande quantité achetable au prix et délai saisis sans trésorerie négative sur tout l'horizon. <i>Objectif d'ouverture</i> = le plus bas entre le prix marché et le prix max. Le tableau compare comptant / 30 / 60 jours pour la même offre.</td></tr>
+          <tr><th>Historique des fournisseurs</th><td>Simulateur d'offre. Regroupe tous les achats saisis par fournisseur : nombre d'offres (et refusées), lots validés, prix moyen validé, meilleur prix vu, dernière offre.</td></tr>
+          <tr><th>Rapport imprimable</th><td>Bouton en haut du tableau de bord. Ouvre l'impression avec synthèse, graphique, récapitulatif mensuel, coût de revient, stock, RSE, diagnostic et notes. Choisissez « Enregistrer en PDF » comme imprimante.</td></tr>
+        </tbody></table>
+      </div>
+
       <div class="card" id="g-ia">
         <h2>Conseiller IA</h2>
         <ul>
-          <li><b>Diagnostic automatique</b> (gratuit, sans IA) : règles calculées en direct sur vos données. Marge par segment (bornes de la fourchette − coût moyen), nombre de lots à vendre pour couvrir les charges fixes (60 000 € ÷ marge par lot), demande perdue, pub trop élevée par rapport au stock, prix hors fourchette ou sous le coût…</li>
+          <li><b>Diagnostic automatique</b> (gratuit, sans IA) : règles calculées en direct sur vos données. Marge par segment (bornes de la fourchette − coût moyen), nombre de lots à vendre pour couvrir les charges fixes (60 000 € ÷ marge par lot), demande perdue, alerte de commande, pub trop élevée par rapport au stock, prix hors fourchette ou sous le coût…</li>
           <li><b>Achat conseillé</b> = demande observée du mois × 1,1 − stock restant en fin de mois − lots déjà commandés qui arrivent le mois suivant.</li>
-          <li><b>Discuter avec Claude</b> (payant à l'usage, clé API nécessaire) : à chaque question, l'IA reçoit les règles du jeu (onglet Paramètres), les fourchettes de prix, le tableau mensuel calculé, toutes vos saisies et vos notes. Elle ne modifie jamais vos données.</li>
+          <li><b>Gemini (gratuit)</b> : clé gratuite sur aistudio.google.com/apikey (compte Google, sans carte bancaire). Limitée en nombre de questions par minute et par jour ; Google peut utiliser les questions de l'offre gratuite pour améliorer ses modèles. Si la limite est atteinte, le site essaie un modèle plus léger, sinon attendez une minute.</li>
+          <li><b>Claude (payant)</b> : clé API Anthropic, facturée à l'usage.</li>
+          <li><b>Copier pour l'IA</b> (sans clé) : copie les règles, toutes vos données calculées et la question écrite. Collez-le dans Claude.ai, Gemini ou ChatGPT.</li>
+          <li><b>Questions rapides</b> : un clic envoie la question à l'IA si une clé est enregistrée, sinon la copie pour l'IA.</li>
+          <li>Dans tous les cas, l'IA reçoit les règles du jeu (Paramètres), les fourchettes de prix, le tableau mensuel calculé, vos saisies et vos notes. Elle ne modifie jamais vos données. Les clés restent dans votre navigateur.</li>
         </ul>
       </div>
 
@@ -253,7 +270,8 @@
 
   <div id="tooltip" class="tooltip" role="status" hidden></div>
   <div id="toast" class="toast" hidden></div>
+  <section id="report" class="report" aria-hidden="true"></section>
 
-  <script type="module" src="app.js?v=1.10"></script>
+  <script type="module" src="app.js?v=2.0"></script>
 </body>
 </html>

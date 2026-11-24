@@ -2,10 +2,13 @@
 // Tout est stocké dans le navigateur (localStorage). Partage via export JSON ou lien.
 
 // Numéro de version affiché dans l'en-tête : à augmenter à chaque mise à jour du site
-const APP_VERSION = "1.10";
+const APP_VERSION = "2.0";
 const APP_DATE = "24/11/2026";
 const STORE_KEY = "pilotage-bouchons-v1";
-const KEY_KEY = "pilotage-bouchons-apikey";
+const KEY_KEY = "pilotage-bouchons-apikey";          // clé Claude (navigateur uniquement)
+const GEM_KEY = "pilotage-bouchons-geminikey";       // clé Gemini (navigateur uniquement)
+const GEM_MODEL_KEY = "pilotage-bouchons-geminimodel";
+const IA_KEY = "pilotage-bouchons-ia";               // "gemini" | "claude"
 const BACKUP_KEY = STORE_KEY + "-sauvegardes"; // copies datées, séparées des données
 const BACKUP_MAX = 40;
 const CLOUD_KEY = STORE_KEY + "-cloud";       // { url, key, code, name } : jamais exporté ni dans le lien de partage
@@ -348,6 +351,219 @@ function priceBadge(seg, prod, prix) {
   if (prix < r[0]) return `<span class="badge warn" title="Fourchette ${r[0]}–${r[1]} €">sous le min (${r[0]} €)</span>`;
   if (prix > r[1]) return `<span class="badge crit" title="Fourchette ${r[0]}–${r[1]} €">au-dessus du max (${r[1]} €)</span>`;
   return `<span class="badge good" title="Fourchette ${r[0]}–${r[1]} €">${r[0]}–${r[1]} €</span>`;
+}
+
+// ---------- aides à la décision ----------
+// Observations passées d'un segment (mois < upto) : prix effectif, délai, pub, demande saisie
+function histoSegment(seg, upto) {
+  const out = [];
+  for (let k = 0; k < Math.min(upto, state.months.length); k++) {
+    const m = state.months[k], d = n0(m.livraisons?.[seg]?.demande);
+    if (d > 0) out.push({ k, nom: m.nom, prix: clampPrix(seg, "Agglomérés", m.marketing[seg].prix), delai: n0(m.marketing[seg].delai), pub: n0(m.marketing.pub), demande: d });
+  }
+  return out;
+}
+// Demande = a + b × prix (moindres carrés) si au moins 2 prix différents ; sinon dernière demande observée
+function modeleDemande(obs) {
+  if (!obs.length) return null;
+  const n = obs.length, mx = obs.reduce((t, o) => t + o.prix, 0) / n, my = obs.reduce((t, o) => t + o.demande, 0) / n;
+  let sxx = 0, sxy = 0;
+  obs.forEach((o) => { sxx += (o.prix - mx) ** 2; sxy += (o.prix - mx) * (o.demande - my); });
+  if (n >= 2 && sxx > 1e-9 && sxy < 0) { const b = sxy / sxx; return { type: "droite", at: (p) => Math.max(0, my + b * (p - mx)), b }; }
+  const last = obs.at(-1).demande;
+  return { type: n >= 2 && sxx > 1e-9 ? "plat" : "dernier", at: () => (n >= 2 ? my : last) };
+}
+// Demande totale attendue : moyenne des 3 derniers mois (≤ i) où une demande a été saisie
+function demandeAttendue(i) {
+  const v = [];
+  for (let k = Math.min(i, state.months.length - 1); k >= 0 && v.length < 3; k--) {
+    const d = SEGMENTS.reduce((t, sg) => t + n0(state.months[k].livraisons?.[sg]?.demande), 0);
+    if (d > 0) v.push(d);
+  }
+  return v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0;
+}
+// Faut-il commander ce mois-ci (livraison industriel 30 jours) ?
+function alerteCommande(c, i) {
+  const next = c.rows[i + 1];
+  if (!next) return null;
+  const D = demandeAttendue(i);
+  if (!D) return null;
+  const dispoNext = next.dispoP["Agglomérés"];
+  const manque = Math.round(D * 1.1 - dispoNext);
+  if (manque <= 0) return null;
+  return { manque, D, dispoNext, nom: c.rows[i].nom, next: next.nom };
+}
+const alerteCommandeTexte = (a) => `<b>Commande à passer en ${esc(a.nom)}</b> : pour ${esc(a.next)} vous aurez ${fmtN(a.dispoNext)} lots d'agglomérés (stock restant + commandes validées) pour une demande attendue d'environ ${fmtN(a.D)} lots. Il manque ≈ <b>${fmtN(a.manque)} lots</b> (avec 10 % de marge) : négociez-les dès ce mois-ci chez un industriel (livraison 30 jours), sinon seul un distributeur pourra vous dépanner.`;
+
+// Estimation du mois i avec les prix planifiés (sert à « Figer la prévision »)
+function estimMois(c, i) {
+  const m = state.months[i], r = c.rows[i];
+  const cm = r.cmupP["Agglomérés"] || n0(state.stockInitial.prix);
+  let dem = 0, caPot = 0, inconnu = [];
+  SEGMENTS.forEach((sg) => {
+    const mod = modeleDemande(histoSegment(sg, i));
+    const pe = clampPrix(sg, "Agglomérés", m.marketing[sg].prix);
+    if (!mod) { inconnu.push(SEG_LABEL[sg]); return; }
+    const d = mod.at(pe); dem += d; caPot += d * pe;
+  });
+  const dispo = r.dispoP["Agglomérés"];
+  const lots = Math.min(dem, dispo), ca = dem ? caPot * lots / dem : 0;
+  const charges = r.fixes + r.stockage + r.transport + r.divers;
+  return { demande: Math.round(dem), lots: Math.round(lots), ca: Math.round(ca), resultat: Math.round(ca - lots * cm - charges), inconnu };
+}
+
+function planifAideHtml(c, i) {
+  const r = c.rows[i], m = state.months[i];
+  const cm = r.cmupP["Agglomérés"] || n0(state.stockInitial.prix);
+  const dispo = r.dispoP["Agglomérés"];
+  let anyObs = false, totBest = 0;
+  const lignes = SEGMENTS.map((sg) => {
+    const rg = range(sg, "Agglomérés"); const obs = histoSegment(sg, i); const mod = modeleDemande(obs);
+    if (obs.length) anyObs = true;
+    const sc = [rg[0], (rg[0] + rg[1]) / 2, rg[1]].map((p) => { const d = mod ? mod.at(p) : null; return { p, d, mg: d === null ? null : d * (p - cm) }; });
+    // Conseil seulement si l'effet du prix a pu être mesuré (au moins 2 prix différents observés)
+    let best = null;
+    if (mod && mod.type !== "dernier") sc.forEach((x) => { if (x.mg !== null && (!best || x.mg > best.mg + 0.5)) best = x; });
+    if (best?.d) totBest += best.d;
+    const hist = obs.slice(-3).map((o) => `${esc(o.nom)} : ${fmtP(o.prix)} → ${fmtN(o.demande)} lots`).join("<br>") || `<span class="muted">aucune donnée</span>`;
+    const modTxt = !mod ? "" : mod.type === "droite" ? `<span class="muted small">−${fmtN(-mod.b)} lots par € de hausse</span>` : mod.type === "plat" ? `<span class="muted small">pas d'effet prix visible</span>` : `<span class="muted small">un seul prix testé : demande supposée identique, pas de conseil (essayez un autre prix pour mesurer l'effet)</span>`;
+    return { sg, rg, sc, best, hist, modTxt, cur: clampPrix(sg, "Agglomérés", m.marketing[sg].prix) };
+  });
+  const cell = (x, best) => `<td class="r ${best === x ? "best" : ""}">${fmtP(x.p)}${x.d !== null ? `<br><span class="small">~${fmtN(x.d)} lots</span><br><span class="small ${cls(x.mg)}">marge ${fmtE(x.mg)}</span>` : `<br><span class="small ${cls(x.p - cm)}">${fmtP(x.p - cm)}/lot</span>`}${best === x ? `<br><span class="badge good">conseillé</span>` : ""}</td>`;
+  const pen = anyObs && totBest > dispo;
+  return `<div class="card aide">
+    <div class="row between"><h2>Aide au choix des prix</h2>${lignes.some((l) => l.best) ? `<button class="btn ghost" id="applyPrix" data-m="${i}">Appliquer les prix conseillés</button>` : ""}</div>
+    <p class="muted small">Pour chaque segment : prix bas / milieu / haut de la fourchette, demande estimée d'après vos mois passés, et marge sur coût d'achat (${fmtP(cm)}/lot). Les charges fixes ne dépendent pas du prix : on garde le prix qui maximise cette marge.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Segment</th><th>Mois passés (prix → demande)</th><th class="r">Prix bas</th><th class="r">Prix milieu</th><th class="r">Prix haut</th></tr></thead>
+      <tbody>${lignes.map((l) => `<tr><td>${SEG_LABEL[l.sg]}<br>${l.modTxt}</td><td class="small">${l.hist}</td>${l.sc.map((x) => cell(x, l.best)).join("")}</tr>`).join("")}</tbody>
+    </table></div>
+    ${!anyObs ? `<div class="alert info"><span class="ico">i</span><span>Pas encore de demande saisie les mois précédents : seule la marge par lot est affichée. Les estimations apparaîtront dès qu'un mois aura sa demande (étape A).</span></div>` : ""}
+    ${pen ? `<div class="alert warn"><span class="ico">!</span><span>Aux prix conseillés, la demande estimée (~${fmtN(totBest)} lots) dépasse votre stock vendable (${fmtN(dispo)} lots) : inutile de baisser les prix ou de faire de la publicité. Montez plutôt les prix des segments les moins rentables.</span></div>` : ""}
+    <p class="muted small">Estimation simple (droite prix → demande sur vos mois passés) : elle ne tient compte ni de la publicité ni des concurrents. Délai de paiement : comptant protège la trésorerie, 30/60 jours peut attirer plus de demande.</p>
+  </div>`;
+}
+
+function prevuHtml(c, i) {
+  const m = state.months[i], r = c.rows[i], p = m.prevu;
+  if (!p) return `<div class="card"><div class="row between"><h2>Prévu / réalisé</h2><button class="btn ghost" id="figerPrevu" data-m="${i}">Figer la prévision de ${esc(m.nom)}</button></div>
+    <p class="muted small">À la fin de la planification, figez la prévision : le site garde une photo des chiffres attendus (demande, lots vendus, CA, résultat) pour les comparer ensuite au réel.</p></div>`;
+  const dem = SEGMENTS.reduce((t, sg) => t + n0(m.livraisons[sg].demande), 0);
+  const lignes = [["Demande clients (lots)", "demande", dem, fmtN], ["Lots vendus", "lots", r.venLots, fmtN], ["Chiffre d'affaires", "ca", r.ca, fmtE], ["Résultat du mois", "resultat", r.resultat, fmtE]];
+  const real = dem > 0 || r.venLots > 0;
+  return `<div class="card"><div class="row between"><h2>Prévu / réalisé · ${esc(m.nom)}</h2><button class="btn ghost" id="figerPrevu" data-m="${i}">Refaire la photo</button></div>
+    <div class="table-wrap"><table><thead><tr><th></th><th class="r">Prévu</th><th class="r">Réalisé</th><th class="r">Écart</th></tr></thead><tbody>
+      ${lignes.map(([lab, k, v, f]) => { const e = v - n0(p[k]); return `<tr><td>${lab}</td><td class="r"><input type="number" class="sm" data-prevu="${k}" data-m="${i}" value="${n0(p[k])}"></td><td class="r">${real ? f(v) : "—"}</td><td class="r ${real ? cls(e) : ""}">${real ? (e > 0 ? "+" : "") + f(e) : "—"}</td></tr>`; }).join("")}
+    </tbody></table></div>
+    <p class="muted small">Prévision figée le ${fmtDate(p.date)}. Les valeurs prévues sont modifiables. Le réalisé se remplit avec la demande (étape A) et les ventes. Notez vos conclusions dans les notes du mois : l'IA les lit.</p></div>`;
+}
+
+// Fiche de négociation (achat) : prix maximum, volume maximum, comparaison des délais
+function negoHtml(c, s, mi) {
+  const tm = Math.min(95, Math.max(0, n0(ui.rev.marge)));
+  const cur = c.rows[mi];
+  const mLiv = Math.min(mi + n0(s.livraison), state.months.length - 1);
+  const mk = state.months[mLiv].marketing, mk0 = state.months[mi].marketing;
+  // Prix de vente de référence : prix planifiés (sinon milieu de fourchette), pondérés par la dernière demande observée
+  let num = 0, den = 0;
+  SEGMENTS.forEach((sg) => {
+    const rg = range(sg, s.produit); if (!rg) return;
+    const pr = n0(mk[sg]?.prix) || n0(mk0[sg]?.prix);
+    const p = s.produit === "Agglomérés" && pr ? clampPrix(sg, s.produit, pr) : (rg[0] + rg[1]) / 2;
+    const obs = histoSegment(sg, state.months.length); const w = obs.length ? obs.at(-1).demande : 1;
+    num += p * w; den += w;
+  });
+  const P = den ? num / den : n0(state.params.prixMarche) * 1.5;
+  const vol = demandeAttendue(state.currentMonth) || n0(s.lots) || 1;
+  const charges = cur.fixes + cur.stockage + (cur.divers);
+  const H = charges / vol;
+  const pMaxMarge = P * (1 - tm / 100) - H, pMaxEq = P - H;
+  const simMin = (lots, delai) => {
+    const sim = structuredClone({ ...state, chat: [] });
+    sim.months[mi].achats.push({ id: "sim", produit: s.produit, lots, prix: n0(s.prix), delai, livraison: n0(s.livraison), transport: s.transport, coutTransport: n0(s.coutTransport), fournisseur: "sim", statut: "validee" });
+    return compute(sim);
+  };
+  // Fenêtre : du mois de l'offre jusqu'à 3 mois après (les mois lointains sans ventes saisies sont toujours négatifs)
+  const wEnd = Math.min(state.months.length - 1, mi + 3);
+  const minW = (cc) => { let v = Infinity, nom = ""; for (let k = mi; k <= wEnd; k++) if (cc.rows[k].tresoFin < v) { v = cc.rows[k].tresoFin; nom = cc.rows[k].nom; } return { v, nom }; };
+  const baseMin = minW(c);
+  let lo = 0, hi = 200000;
+  if (n0(s.prix) > 0 && baseMin.v >= 0) {
+    if (minW(simMin(hi, n0(s.delai))).v >= 0) lo = hi;
+    else { while (hi - lo > 50) { const mid = Math.floor((lo + hi) / 2); if (minW(simMin(mid, n0(s.delai))).v >= 0) lo = mid; else hi = mid; } }
+  }
+  const cols = [mi, mi + 1, mi + 2].filter((k) => k < state.months.length);
+  const delais = DELAIS.map((d, k) => { const cc = simMin(n0(s.lots), k); return { d, k, fins: cols.map((j) => cc.rows[j].tresoFin) }; });
+  const prix = n0(s.prix);
+  const verdict = !prix ? "" : prix <= pMaxMarge ? `<span class="badge good">OK : marge ≥ ${tm} %</span>` : prix <= pMaxEq ? `<span class="badge warn">rentable mais marge < ${tm} %</span>` : `<span class="badge crit">trop cher : vente à perte</span>`;
+  const couverture = demandeAttendue(state.currentMonth) ? n0(s.lots) / demandeAttendue(state.currentMonth) : null;
+  return `<div class="card">
+    <h2>Jusqu'où négocier ? <span class="muted small">(offre de ${fmtN(n0(s.lots))} lots de ${esc(s.produit)} à ${fmtP(prix)})</span></h2>
+    <div class="grid k4">
+      <div class="kpi"><div class="label">Prix max pour ${tm} % de marge</div><div class="value">${fmtP(pMaxMarge)}</div><div class="hint">${verdict}</div></div>
+      <div class="kpi"><div class="label">Prix max à l'équilibre</div><div class="value">${fmtP(pMaxEq)}</div><div class="hint">au-delà : perte</div></div>
+      <div class="kpi"><div class="label">Lots max sans tréso négative</div><div class="value">${!prix ? "—" : baseMin.v < 0 ? "0" : lo >= 200000 ? "> 200 000" : fmtN(lo)}</div><div class="hint">${baseMin.v < 0 ? `tréso déjà négative en ${esc(baseMin.nom)} sans l'offre` : `à ${fmtP(prix)}, paiement ${DELAIS[n0(s.delai)].toLowerCase()}, jusqu'en ${esc(c.rows[wEnd].nom)}`}</div></div>
+      <div class="kpi"><div class="label">Objectif d'ouverture</div><div class="value">${fmtP(Math.min(n0(state.params.prixMarche), pMaxMarge))}</div><div class="hint">prix marché ${fmtP(n0(state.params.prixMarche))}</div></div>
+    </div>
+    <p class="muted small section-gap">Calcul : prix de vente moyen attendu ${fmtP(P)} (vos prix planifiés, sinon milieu de fourchette, pondérés par la dernière demande) × (1 − ${tm} %) − charges par lot ${fmtP(H)} (salaires, structure, stockage, pub et autres du mois : ${fmtE(charges)} ÷ ${fmtN(vol)} lots ${demandeAttendue(state.currentMonth) ? "de demande attendue" : "de l'offre"}). Marge visée réglable dans l'onglet Coût de revient.${couverture ? ` Cette offre couvre ≈ ${couverture.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} mois de demande.` : ""}</p>
+    <table><thead><tr><th>Délai de paiement</th>${cols.map((j) => `<th class="r">Tréso fin ${esc(c.rows[j].nom)}</th>`).join("")}</tr></thead><tbody>
+      ${delais.map((x) => `<tr class="${x.k === n0(s.delai) ? "current" : ""}"><td>${x.d}</td>${x.fins.map((v) => `<td class="r ${cls(v)}">${fmtE(v)}</td>`).join("")}</tr>`).join("")}
+    </tbody></table>
+    <p class="muted small">Argument : un paiement à 30 ou 60 jours vaut de l'argent pour vous. Si le fournisseur refuse de baisser le prix, demandez un délai ou un transport en train (RSE).</p>
+  </div>`;
+}
+function fournisseursHtml() {
+  const map = new Map();
+  state.months.forEach((m) => m.achats.forEach((a) => {
+    const f = (a.fournisseur || "").trim() || "(sans nom)";
+    const x = map.get(f) || { f, offres: 0, valLots: 0, valMontant: 0, best: Infinity, refus: 0, last: null };
+    const st = a.statut || "validee";
+    x.offres++; if (st === "refusee") x.refus++;
+    if (st === "validee") { x.valLots += n0(a.lots); x.valMontant += n0(a.lots) * n0(a.prix); }
+    if (n0(a.prix) > 0) x.best = Math.min(x.best, n0(a.prix));
+    x.last = { nom: m.nom, prix: n0(a.prix), delai: DELAIS[n0(a.delai)], st: STATUTS.find((z) => z[1] === st)?.[0] || st, produit: a.produit };
+    map.set(f, x);
+  }));
+  const list = [...map.values()];
+  return `<div class="card"><h2>Historique des fournisseurs</h2>
+    ${list.length ? `<div class="table-wrap"><table><thead><tr><th>Fournisseur</th><th class="r">Offres</th><th class="r">Lots validés</th><th class="r">Prix moyen validé</th><th class="r">Meilleur prix vu</th><th>Dernière offre</th></tr></thead><tbody>
+      ${list.map((x) => `<tr><td>${esc(x.f)}</td><td class="r">${x.offres}${x.refus ? ` <span class="muted small">(${x.refus} refusée${x.refus > 1 ? "s" : ""})</span>` : ""}</td><td class="r">${fmtN(x.valLots)}</td><td class="r">${x.valLots ? fmtP(x.valMontant / x.valLots) : "—"}</td><td class="r">${Number.isFinite(x.best) ? fmtP(x.best) : "—"}</td><td class="small">${esc(x.last.nom)} · ${esc(x.last.produit)} ${fmtP(x.last.prix)} · ${esc(x.last.delai)} · ${esc(x.last.st)}</td></tr>`).join("")}
+    </tbody></table></div>
+    <p class="muted small">Construit à partir des achats saisis (étape B), y compris les offres refusées ou en négociation. Le « meilleur prix vu » est un bon argument face aux autres fournisseurs.</p>`
+    : `<p class="muted">Aucun achat saisi pour l'instant (étape B de la saisie du mois).</p>`}</div>`;
+}
+
+// Rapport imprimable (PDF via l'impression du navigateur)
+function printReport() {
+  const c = compute(state);
+  const cur = c.rows[state.currentMonth];
+  const clone = (el) => (el ? el.cloneNode(true) : null);
+  const dash = document.getElementById("tab-dashboard");
+  const rev = clone(document.getElementById("tab-revient"));
+  rev?.querySelectorAll(".form-grid").forEach((x) => x.remove());
+  const stockCards = document.querySelectorAll("#tab-stock > .card");
+  const notes = state.months.filter((m) => m.planif || m.nego).map((m) => `<h3>${esc(m.nom)}</h3>${m.planif ? `<p><b>Planification :</b> ${esc(m.planif).replace(/\n/g, "<br>")}</p>` : ""}${m.nego ? `<p><b>Négociation :</b> ${esc(m.nego).replace(/\n/g, "<br>")}</p>` : ""}`).join("");
+  const rep = document.getElementById("report");
+  rep.innerHTML = `
+    <h1>Rapport de contrôle de gestion · ${esc(state.team || "Notre entreprise")}</h1>
+    <p class="muted">Distributeur de bouchons de liège · situation à fin ${esc(cur.nom)} · édité le ${new Date().toLocaleDateString("fr-FR")}</p>
+    <h2>1. Synthèse</h2>
+    ${clone(dash.querySelector(".grid.k4"))?.outerHTML || ""}
+    ${clone(document.getElementById("tresoChart")?.closest(".card"))?.outerHTML || ""}
+    <h2>2. Récapitulatif mensuel</h2>
+    ${clone(dash.querySelector(":scope > .card:last-child"))?.outerHTML || ""}
+    <h2>3. Coût de revient (méthode des coûts complets)</h2>
+    ${rev ? rev.innerHTML : ""}
+    <h2>4. Stock et RSE</h2>
+    ${[...stockCards].map((x) => x.outerHTML).join("")}
+    <h2>5. Diagnostic</h2>
+    <div class="card"><ul>${adviceRules(c).map((a) => `<li>${a.t}</li>`).join("")}</ul></div>
+    ${notes ? `<h2>6. Décisions et notes</h2><div class="card">${notes}</div>` : ""}`;
+  const html = document.documentElement, prevTheme = html.dataset.theme;
+  html.dataset.theme = "light";
+  const done = () => { if (prevTheme) html.dataset.theme = prevTheme; else delete html.dataset.theme; rep.innerHTML = ""; window.removeEventListener("afterprint", done); };
+  window.addEventListener("afterprint", done);
+  setTimeout(() => window.print(), 50);
 }
 
 // ---------- coût de revient (méthode des coûts complets) ----------
@@ -709,6 +925,8 @@ function renderMonthSelect() {
 
 function alertsFor(c) {
   const out = [];
+  const ac = alerteCommande(c, state.currentMonth);
+  if (ac) out.push({ cls: "warn", t: alerteCommandeTexte(ac) });
   const p = state.params;
   c.rows.forEach((r) => {
     if (r.tresoFin < 0) out.push({ cls: "crit", t: `<b>${r.nom}</b> : trésorerie négative prévue (${fmtE(r.tresoFin)}).` });
@@ -727,6 +945,7 @@ function renderDashboard(c) {
   const alerts = alertsFor(c);
   const el = document.getElementById("tab-dashboard");
   el.innerHTML = `
+    <div class="row between dash-top"><span class="muted small">Mois en cours : <b>${esc(cur.nom)}</b></span><button class="btn ghost" id="reportBtn" title="Ouvre l'impression : choisissez « Enregistrer en PDF »">Rapport imprimable (PDF)</button></div>
     <div class="grid k4">
       <div class="card kpi"><div class="label">Trésorerie fin ${esc(cur.nom)}</div><div class="value ${cls(cur.tresoFin)}">${fmtE(cur.tresoFin)}</div><div class="hint">début de mois : ${fmtE(cur.tresoDebut)}</div></div>
       <div class="card kpi"><div class="label">Stock fin ${esc(cur.nom)}</div><div class="value">${fmtN(cur.lotsFin)} lots</div><div class="hint">valeur ${fmtE(cur.valFin)} · en transit : ${fmtN(cur.transit)}</div></div>
@@ -880,6 +1099,8 @@ function renderMois(c) {
       <p class="muted small">Coût moyen des agglomérés ce mois-ci : <b>${fmtP(cmA)}</b>/lot${c.rows[i + 1] && Math.abs(c.rows[i + 1].cmupP["Agglomérés"] - cmA) > 0.005 && c.rows[i + 1].dispoP["Agglomérés"] > 0 ? ` → <b>${fmtP(c.rows[i + 1].cmupP["Agglomérés"])}</b> en ${esc(c.rows[i + 1].nom)} après réception des achats` : ""}. Les prix et délais fixés ici servent de valeurs par défaut pour les ventes du mois.</p>
       <div class="alert info"><span class="ico">€</span><span>${seuilHtml(r, true)}. Vendre en dessous de ce prix moyen fait perdre de l'argent ce mois-ci (coût d'achat + salaires + structure + stockage + pub + transport + autres dépenses).</span></div>
     </div>
+    ${planifAideHtml(c, i)}
+    ${prevuHtml(c, i)}
 
     <h2 class="section-gap phase nego">Phase de négociation</h2>
     <div class="card">
@@ -910,6 +1131,7 @@ function renderMois(c) {
 
     <div class="card">
       <div class="row between"><h2>Étape B · Négociations (stock du mois prochain)</h2><button class="btn" data-add="achats">+ Ajouter un achat</button></div>
+      ${(() => { const ac = alerteCommande(c, i); return ac ? `<div class="alert warn"><span class="ico">!</span><span>${alerteCommandeTexte(ac)}</span></div>` : ""; })()}
       <p class="muted small">Livraison industriel → distributeur : <b>30 jours</b> (le stock arrive le mois suivant). Distributeur → distributeur : instantané. Prix marché de référence agglomérés : ${fmtP(n0(state.params.prixMarche))}/lot.${c.rows[i + 1] && r.cmdLots ? ` Coût moyen des agglomérés en ${esc(c.rows[i + 1].nom)} après réception : <b>${fmtP(c.rows[i + 1].cmupP["Agglomérés"])}</b> (aujourd'hui ${fmtP(r.cmupP["Agglomérés"])}).` : ""} Dans le jeu, les agglomérés sont sous « Bouchons triés ». Seules les offres <b>validées</b> comptent dans les calculs ; une offre acceptée des deux côtés est irréversible.</p>
       <div class="table-wrap"><table>
         <thead><tr><th>Statut</th><th>Fournisseur</th><th>Produit</th><th class="r">Lots</th><th class="r">Prix/lot</th><th>Livraison</th><th>Paiement</th><th>Transport</th><th class="r">Coût transp. (€)</th><th class="r">Total</th><th></th></tr></thead>
@@ -1084,7 +1306,9 @@ function renderSimu(c) {
         <h2>Trésorerie avec l'offre</h2>
         <div class="chart" id="simuChart"></div>
       </div>
-    </div>`;
+    </div>
+    ${s.type === "achat" ? negoHtml(c, s, mi) : ""}
+    ${fournisseursHtml()}`;
   drawTresoChart(document.getElementById("simuChart"), c2.rows);
   if (focus) { const f = el.querySelector(`[data-simu="${focus}"]`); if (f) f.focus(); }
 }
@@ -1125,6 +1349,8 @@ function adviceRules(c) {
     const besoin = Math.max(0, Math.round(demM * 1.1 - Math.max(0, cur.lotsFin) - dejaAttendu));
     out.push({ cls: "info", t: `Achat conseillé pour ${esc(next?.nom || "le mois prochain")} : demande observée ${fmtN(demM)} lots (+10 % de marge) − stock restant ${fmtN(Math.max(0, cur.lotsFin))} − déjà commandé ${fmtN(dejaAttendu)} ≈ <b>${fmtN(besoin)} lots</b> à négocier. Ajustez selon votre budget pub et vos prix du mois prochain.` });
   }
+  const ac = alerteCommande(c, state.currentMonth);
+  if (ac) out.push({ cls: "warn", t: alerteCommandeTexte(ac) });
   const enNego = m.achats.filter((a) => a.statut === "nego");
   if (enNego.length) out.push({ cls: "info", t: `${enNego.length} proposition(s) d'achat en négociation (non comptée(s)). Passez-les en « Validée » une fois acceptées par les deux parties.` });
   out.push({ cls: "info", t: `Livraison industriel → distributeur en 30 jours : ce que vous achetez en ${esc(m.nom)} n'arrive qu'au début de ${esc(state.months[Math.min(state.currentMonth + 1, state.months.length - 1)].nom)}. Utilisez les commandes observées à l'étape A pour estimer vos besoins.` });
@@ -1209,28 +1435,65 @@ function mdToHtml(t) {
   return out.replace(/(<br>){3,}/g, "<br><br>");
 }
 
-function getKey() { try { return localStorage.getItem(KEY_KEY) || ""; } catch { return ""; } }
+const lsGet = (k) => { try { return localStorage.getItem(k) || ""; } catch { return ""; } };
+const lsSet = (k, v) => { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch {} };
+function iaProvider() { const p = lsGet(IA_KEY); if (p) return p; return lsGet(KEY_KEY) && !lsGet(GEM_KEY) ? "claude" : "gemini"; }
+const keyFor = (prov) => lsGet(prov === "claude" ? KEY_KEY : GEM_KEY);
+function getKey() { return keyFor(iaProvider()); }
+
+const QUICK_QUESTIONS = [
+  "Quels prix, délais et budget pub fixer en planification ce mois-ci ?",
+  "On a une offre fournisseur en négociation : faut-il l'accepter ?",
+  "Combien de lots acheter et à quel prix maximum ?",
+  "Quel est notre plus gros risque en ce moment ?",
+  "Comment éviter une trésorerie négative ?",
+  "Quel segment privilégier et pourquoi ?",
+];
+function promptForCopy(question) {
+  const c = compute(state);
+  return `${SYSTEM_PROMPT(state.rules)}\n\n${contextForAI(c)}\n\nQuestion de l'équipe : ${question || "Fais le point sur notre situation et dis-nous quoi décider ce mois-ci (planification et négociations)."}`;
+}
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch {}
+  const ta = document.createElement("textarea"); ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+  document.body.appendChild(ta); ta.select();
+  let ok = false; try { ok = document.execCommand("copy"); } catch {}
+  ta.remove(); return ok;
+}
+async function copyForAI(question) {
+  const ok = await copyText(promptForCopy(question));
+  toast(ok ? "Copié ! Collez-le dans Claude.ai, Gemini ou ChatGPT (Cmd/Ctrl + V)" : "Copie impossible dans ce navigateur");
+}
 
 function renderIA(c) {
   const el = document.getElementById("tab-ia");
-  const key = getKey();
+  const prov = iaProvider();
+  const key = keyFor(prov);
   const advice = adviceRules(c);
   const prevScroll = el.querySelector(".chat")?.scrollTop;
   const draft = document.getElementById("chatInput")?.value || "";
+  const keyHelp = prov === "gemini"
+    ? `Clé <b>gratuite</b> : <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> (compte Google, sans carte bancaire) → « Create API key ». Offre gratuite limitée en nombre de questions par minute et par jour ; Google peut utiliser les questions pour améliorer ses modèles.`
+    : `Clé payante à l'usage : console.anthropic.com → API Keys.`;
   el.innerHTML = `
     <div class="grid c2">
       <div class="card">
         <h2>Diagnostic automatique</h2>
-        <p class="muted small">Calculé à partir de vos saisies, sans IA. Se met à jour en direct.</p>
+        <p class="muted small">Calculé à partir de vos saisies, sans IA. Gratuit, se met à jour en direct.</p>
         ${advice.map((a) => `<div class="alert ${a.cls}"><span>${a.t}</span></div>`).join("")}
       </div>
       <div class="card">
-        <h2>Discuter avec Claude</h2>
-        ${key ? `<p class="muted small">Clé API enregistrée dans ce navigateur uniquement. <button class="btn ghost" id="forgetKey" style="padding:2px 8px">Oublier la clé</button></p>`
-        : `<p class="small">Pour activer l'IA, collez une clé API Anthropic (console.anthropic.com → API Keys). Elle reste <b>uniquement dans votre navigateur</b> et n'est jamais incluse dans l'export ni dans le lien partagé.</p>
-           <div class="row"><input type="password" id="apiKey" placeholder="sk-ant-…" style="flex:1"><button class="btn" id="saveKey">Enregistrer</button></div>`}
+        <h2>Discuter avec l'IA</h2>
+        <div class="row">
+          <label class="field" style="flex:1">IA utilisée<select id="iaProvider">${opts([["Gemini (gratuit)", "gemini"], ["Claude (payant)", "claude"]], prov)}</select></label>
+        </div>
+        ${key ? `<p class="muted small">Clé ${prov === "gemini" ? "Gemini" : "Claude"} enregistrée dans ce navigateur uniquement. <button class="btn ghost" id="forgetKey" style="padding:2px 8px">Oublier la clé</button></p>`
+        : `<p class="small">${keyHelp} La clé reste <b>uniquement dans votre navigateur</b> (jamais dans l'export, le lien ou la synchronisation).</p>
+           <div class="row"><input type="password" id="apiKey" placeholder="${prov === "gemini" ? "AIza…" : "sk-ant-…"}" style="flex:1"><button class="btn" id="saveKey">Enregistrer</button></div>`}
+        <div class="alert info"><span class="ico">⧉</span><span><b>Sans clé :</b> <button class="btn ghost" id="copyAI" style="padding:2px 8px">Copier pour l'IA</button> copie vos données + les règles + la question écrite en bas. Collez ensuite dans Claude.ai, Gemini ou ChatGPT (gratuits).</span></div>
+        <p class="muted small" style="margin:8px 0 0">Questions rapides (un clic : ${key ? "envoyée à l'IA" : "copiée pour l'IA"}) :</p>
         <div class="suggestions">
-          ${["Quels prix et délais fixer en planification ce mois-ci ?", "STECKER nous propose une offre, que faire ?", "Combien acheter pour le mois prochain ?", "Comment éviter une trésorerie négative ?", "Combien mettre en publicité ?"].map((q) => `<button class="pill" data-q="${esc(q)}">${esc(q)}</button>`).join("")}
+          ${QUICK_QUESTIONS.map((q) => `<button class="pill" data-q="${esc(q)}">${esc(q)}</button>`).join("")}
         </div>
         <div class="chat" id="chat">${state.chat.length ? state.chat.map((m) => `<div class="msg ${m.role}${m.err ? " err" : ""}">${m.role === "assistant" ? mdToHtml(m.text) : esc(m.text).replace(/\n/g, "<br>")}</div>`).join("") : `<p class="muted small">Posez une question : l'IA reçoit automatiquement l'état complet de votre entreprise (trésorerie, stock, planification, offres, notes).</p>`}</div>
         <div class="chat-input">
@@ -1244,17 +1507,82 @@ function renderIA(c) {
 }
 
 let Anthropic = null;
-async function askClaude(question) {
-  const key = getKey();
-  if (!key || !question.trim() || ui.busy) return;
+async function streamClaude(key, system, messages, onText) {
+  if (!Anthropic) Anthropic = (await import("https://esm.sh/@anthropic-ai/sdk")).default;
+  const client = new Anthropic({ apiKey: key, dangerouslyAllowBrowser: true });
+  const stream = client.beta.messages.stream({
+    model: "claude-opus-5-5",
+    max_tokens: 16000,
+    thinking: { type: "adaptive" },
+    output_config: { effort: "medium" },
+    betas: ["server-side-fallback-2026-07-01"],
+    fallbacks: "default",
+    system,
+    messages,
+  });
+  stream.on("text", onText);
+  const final = await stream.finalMessage();
+  return final.stop_reason === "refusal" ? "refus" : final.stop_reason === "max_tokens" ? "tronque" : "";
+}
+async function pickGeminiModel(key) {
+  try {
+    const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", { headers: { "x-goog-api-key": key } });
+    if (!r.ok) return null;
+    const j = await r.json();
+    const ok = (j.models || []).filter((m) => (m.supportedGenerationMethods || []).includes("generateContent") && /flash/.test(m.name) && !/(image|tts|live|audio|embedding|exp)/.test(m.name));
+    ok.sort((a, b) => (/preview/.test(a.name) ? 1 : 0) - (/preview/.test(b.name) ? 1 : 0) || (/lite/.test(a.name) ? 1 : 0) - (/lite/.test(b.name) ? 1 : 0));
+    return ok[0]?.name.replace(/^models\//, "") || null;
+  } catch { return null; }
+}
+async function streamGemini(key, system, messages, onText) {
+  const body = JSON.stringify({
+    systemInstruction: { parts: [{ text: system }] },
+    contents: messages.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] })),
+  });
+  const call = (mdl) => fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(mdl)}:streamGenerateContent?alt=sse`, {
+    method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": key }, body,
+  });
+  let model = lsGet(GEM_MODEL_KEY) || "gemini-flash-latest";
+  let res = await call(model);
+  if (res.status === 404) { const m2 = await pickGeminiModel(key); if (m2 && m2 !== model) { model = m2; lsSet(GEM_MODEL_KEY, m2); res = await call(model); } }
+  if (res.status === 429 && !/lite/.test(model)) res = await call("gemini-flash-lite-latest"); // quota du modèle principal atteint
+  if (!res.ok) {
+    const t = await res.text(); let msg = t;
+    try { msg = JSON.parse(t).error?.message || t; } catch {}
+    const e = new Error(msg); e.status = res.status; throw e;
+  }
+  const reader = res.body.getReader(); const dec = new TextDecoder();
+  let buf = "", finish = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let idx;
+    while ((idx = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, idx).trim(); buf = buf.slice(idx + 1);
+      if (!line.startsWith("data:")) continue;
+      try {
+        const j = JSON.parse(line.slice(5));
+        const cand = j.candidates?.[0];
+        (cand?.content?.parts || []).forEach((pt) => { if (pt.text && !pt.thought) onText(pt.text); });
+        if (cand?.finishReason === "MAX_TOKENS") finish = "tronque";
+        if (cand?.finishReason === "SAFETY" || j.promptFeedback?.blockReason) finish = "refus";
+      } catch {}
+    }
+  }
+  return finish;
+}
+async function askAI(question) {
+  const prov = iaProvider();
+  const key = keyFor(prov);
+  if (!question.trim() || ui.busy) return;
+  if (!key) { copyForAI(question); return; }
   document.getElementById("chatInput").value = "";
   state.chat.push({ role: "user", text: question.trim() });
   const reply = { role: "assistant", text: "" };
   state.chat.push(reply);
   ui.busy = true; save(); render(); scrollChat();
   try {
-    if (!Anthropic) Anthropic = (await import("https://esm.sh/@anthropic-ai/sdk")).default;
-    const client = new Anthropic({ apiKey: key, dangerouslyAllowBrowser: true });
     const c = compute(state);
     const history = state.chat.slice(0, -1).filter((m) => !m.err && m.text).slice(-20);
     while (history.length && history[0].role !== "user") history.shift();
@@ -1262,27 +1590,22 @@ async function askClaude(question) {
       role: m.role,
       content: idx === history.length - 1 ? `${contextForAI(c)}\n\nQuestion de l'équipe : ${m.text}` : m.text,
     }));
-    const stream = client.beta.messages.stream({
-      model: "claude-opus-5-5",
-      max_tokens: 16000,
-      thinking: { type: "adaptive" },
-      output_config: { effort: "medium" },
-      betas: ["server-side-fallback-2026-07-01"],
-      fallbacks: "default",
-      system: SYSTEM_PROMPT(state.rules),
-      messages,
-    });
-    stream.on("text", (t) => { reply.text += t; updateLastMsg(reply.text); });
-    const final = await stream.finalMessage();
-    if (final.stop_reason === "refusal") reply.text += "\n\n(La requête a été refusée par le modèle. Reformulez la question.)";
-    if (final.stop_reason === "max_tokens") reply.text += "\n\n(Réponse tronquée.)";
+    const onText = (t) => { reply.text += t; updateLastMsg(reply.text); };
+    const end = prov === "claude" ? await streamClaude(key, SYSTEM_PROMPT(state.rules), messages, onText) : await streamGemini(key, SYSTEM_PROMPT(state.rules), messages, onText);
+    if (end === "refus") reply.text += "\n\n(La requête a été refusée par le modèle. Reformulez la question.)";
+    if (end === "tronque") reply.text += "\n\n(Réponse tronquée.)";
     if (!reply.text) reply.text = "(Pas de réponse.)";
   } catch (e) {
     reply.err = true;
-    const status = e?.status;
-    reply.text = status === 401 ? "Clé API invalide (401). Vérifiez la clé dans l'onglet Conseiller IA."
-      : status === 429 ? "Trop de requêtes ou crédit épuisé (429). Réessayez dans un instant."
-      : `Erreur : ${e?.message || e}`;
+    const st = e?.status, msg = String(e?.message || e);
+    reply.text = prov === "gemini"
+      ? (/API key not valid|API_KEY_INVALID/i.test(msg) || st === 401 ? "Clé Gemini invalide. Vérifiez-la (aistudio.google.com/apikey) puis enregistrez-la à nouveau."
+        : st === 429 ? "Limite gratuite de Gemini atteinte (trop de questions par minute ou par jour). Réessayez dans une minute, ou utilisez « Copier pour l'IA »."
+        : st === 403 ? "Accès refusé par Google (403) : la clé n'a peut-être pas accès à l'API Gemini. Créez-la depuis aistudio.google.com/apikey."
+        : `Erreur Gemini : ${msg}`)
+      : (st === 401 ? "Clé API Claude invalide (401)."
+        : st === 429 ? "Trop de requêtes ou crédit épuisé (429). Réessayez dans un instant."
+        : `Erreur : ${msg}`);
   } finally {
     ui.busy = false; save(); render(); scrollChat();
   }
@@ -1388,7 +1711,7 @@ document.addEventListener("click", (e) => {
     save(); render(); return;
   }
   if (t.dataset.del) { state.months[ui.editMonth][t.dataset.del].splice(+t.dataset.j, 1); save(); render(); return; }
-  if (t.dataset.q) { const ci = document.getElementById("chatInput"); if (ci) { ci.value = t.dataset.q; ci.focus(); } return; }
+  if (t.dataset.q) { if (getKey() && !ui.busy) askAI(t.dataset.q); else copyForAI(t.dataset.q); return; }
   if (/^cloud/.test(t.id) || t.dataset.cloudrestore !== undefined) { cloudClick(t.id, t); return; }
   if (t.dataset.restore !== undefined) {
     const b = listBackups()[+t.dataset.restore];
@@ -1414,11 +1737,31 @@ document.addEventListener("click", (e) => {
     }
     case "saveKey": {
       const v = document.getElementById("apiKey").value.trim();
-      if (v) { try { localStorage.setItem(KEY_KEY, v); } catch {} render(); toast("Clé enregistrée dans ce navigateur"); }
+      if (v) { lsSet(iaProvider() === "claude" ? KEY_KEY : GEM_KEY, v); lsSet(IA_KEY, iaProvider()); render(); toast("Clé enregistrée dans ce navigateur"); }
       break;
     }
-    case "forgetKey": try { localStorage.removeItem(KEY_KEY); } catch {} render(); break;
-    case "sendChat": askClaude(document.getElementById("chatInput").value); break;
+    case "forgetKey": lsSet(iaProvider() === "claude" ? KEY_KEY : GEM_KEY, ""); render(); break;
+    case "sendChat": askAI(document.getElementById("chatInput").value); break;
+    case "figerPrevu": {
+      const i = +t.dataset.m, e = estimMois(compute(state), i);
+      state.months[i].prevu = { date: new Date().toISOString(), demande: e.demande, lots: e.lots, ca: e.ca, resultat: e.resultat };
+      save(); render(); toast(e.inconnu.length ? `Prévision figée (demande inconnue pour : ${e.inconnu.join(", ")} — corrigez les valeurs si besoin)` : "Prévision figée"); break;
+    }
+    case "applyPrix": {
+      if (!confirm("Remplacer les prix de la planification par les prix conseillés ?")) break;
+      const i = +t.dataset.m, c0 = compute(state), cm = c0.rows[i].cmupP["Agglomérés"] || n0(state.stockInitial.prix);
+      SEGMENTS.forEach((sg) => {
+        const rg = range(sg, "Agglomérés"), mod = modeleDemande(histoSegment(sg, i));
+        const cand = [rg[0], (rg[0] + rg[1]) / 2, rg[1]];
+        let best = null, bv = -Infinity;
+        if (!mod || mod.type === "dernier") return;
+        cand.forEach((p) => { const v = mod.at(p) * (p - cm); if (v > bv + 0.5) { bv = v; best = p; } });
+        if (best !== null && bv > 0) state.months[i].marketing[sg].prix = best;
+      });
+      save(); render(); toast("Prix conseillés appliqués"); break;
+    }
+    case "copyAI": copyForAI(document.getElementById("chatInput")?.value || ""); break;
+    case "reportBtn": printReport(); break;
     case "autoAlloc": {
       const i = ui.editMonth, m = state.months[i];
       SEGMENTS.forEach((sg) => { m.livraisons[sg].livre = 0; });
@@ -1467,6 +1810,12 @@ document.addEventListener("click", (e) => {
 
 document.addEventListener("change", (e) => {
   const t = e.target;
+  if (t.id === "iaProvider") { lsSet(IA_KEY, t.value); renderIA(compute(state)); return; }
+  if (t.dataset.prevu) {
+    const m = state.months[+t.dataset.m];
+    if (m.prevu) { m.prevu[t.dataset.prevu] = n0(t.value); save(); render(); }
+    return;
+  }
   if (t.id === "currentMonth") { state.currentMonth = +t.value; ui.editMonth = state.currentMonth; ui.simu.mois = state.currentMonth; save(); render(); return; }
   if (t.dataset.list) {
     const item = state.months[+t.dataset.m][t.dataset.list][+t.dataset.j];
@@ -1538,7 +1887,7 @@ document.addEventListener("input", (e) => {
 });
 
 document.addEventListener("keydown", (e) => {
-  if (e.target.id === "chatInput" && e.key === "Enter" && !e.shiftKey) { e.preventDefault(); askClaude(e.target.value); }
+  if (e.target.id === "chatInput" && e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (getKey()) askAI(e.target.value); }
 });
 
 let toastTimer;

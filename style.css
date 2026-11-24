@@ -271,3 +271,18 @@ tr.inactive td { opacity: .55; }
 .version.cloud.ok { color: var(--good); background: var(--good-bg); border-color: transparent; }
 .version.cloud.busy { color: var(--warn); background: var(--warn-bg); border-color: transparent; }
 .version.cloud.err { color: var(--crit); background: var(--crit-bg); border-color: transparent; }
+
+td.best { background: var(--good-bg); }
+.dash-top { margin-bottom: 12px; }
+#report { display: none; }
+@media print {
+  body > *:not(#report) { display: none !important; }
+  #report { display: block; padding: 0; color: #000; }
+  #report h1 { font-size: 18pt; margin: 0 0 4px; }
+  #report h2 { font-size: 13pt; margin: 18px 0 8px; break-after: avoid; }
+  #report .card { box-shadow: none; break-inside: avoid; border: 1px solid #ccc; }
+  #report .table-wrap { overflow: visible; }
+  #report table { font-size: 8pt; }
+  #report button, #report input, #report select { display: none; }
+  @page { margin: 12mm; }
+}

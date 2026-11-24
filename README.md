@@ -9,7 +9,8 @@ Outil de pilotage pour le jeu d'entreprise « distributeur de bouchons de liège
 - **Stock** : mouvements, coût moyen pondéré (CMUP), couverture, frais de stockage (0,33 %), bilan RSE des transports.
 - **Coût de revient** : méthode des coûts complets (coûts de production + hors production ÷ quantité vendue), répartition des charges indirectes par CA ou par lots, par produit, par marché et par produit × marché, prix à pratiquer pour une marge visée.
 - **Simulateur d'offre** : tester une offre avant de signer et voir son impact sur la trésorerie de tous les mois suivants.
-- **Conseiller IA** : diagnostic automatique + discussion avec Claude, qui reçoit l'état complet de l'entreprise (une clé API Anthropic est nécessaire, elle reste dans votre navigateur).
+- **Aides à la décision** : alerte de commande (livraison industriel 30 jours), aide au choix des prix par segment (demande estimée d'après les mois passés), prévu / réalisé, fiche « jusqu'où négocier » (prix max, lots max sans trésorerie négative, comparaison des délais de paiement), historique des fournisseurs, rapport imprimable (PDF).
+- **Conseiller IA** : diagnostic automatique gratuit + discussion avec Gemini (clé gratuite Google AI Studio) ou Claude (payant), questions rapides, et bouton « Copier pour l'IA » pour utiliser n'importe quel chat gratuit sans clé. Les clés restent dans le navigateur.
 
 ## Hypothèses de calcul
 
