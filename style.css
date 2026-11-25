@@ -294,3 +294,4 @@ td.best { background: var(--good-bg); }
 
 .inner-card { border-top: 1px solid var(--border); margin-top: 14px; padding-top: 10px; }
 .inner-card h2 { font-size: 1rem; }
+.q-grid.q-first { grid-template-columns: 1fr; margin: 0 0 8px; }

@@ -2,7 +2,7 @@
 // Tout est stocké dans le navigateur (localStorage). Partage via export JSON ou lien.
 
 // Numéro de version affiché dans l'en-tête : à augmenter à chaque mise à jour du site
-const APP_VERSION = "2.5";
+const APP_VERSION = "2.6";
 const APP_DATE = "25/11/2026";
 const STORE_KEY = "pilotage-bouchons-v1";
 const KEY_KEY = "pilotage-bouchons-apikey";          // clé Claude (navigateur uniquement)
@@ -1403,14 +1403,12 @@ function renderMois(c) {
           return `<div class="seg">
             <h3>${SEG_LABEL[s]}</h3>
             ${["Agglomérés", ...QS].some((pr) => besoin(s, pr, i)) ? `<p class="muted small" style="margin:-4px 0 8px">Besoins annoncés : ${["Agglomérés", ...QS].filter((pr) => besoin(s, pr, i)).map((pr) => `${pr === "Agglomérés" ? "Agglo" : pr} ${fmtN(besoin(s, pr, i))}`).join(" · ")}</p>` : ""}
+            <div class="q-grid q-first">${QS.map((q) => { const rq = range(s, q); return `<label class="field">Prix ${q} (€) <span class="muted small">${rq ? `${rq[0]}–${rq[1]}` : ""}</span><input type="number" step="0.5" data-mk="${s}" data-mkk="prix${q}" data-m="${i}" value="${esc(mk["prix" + q] || 0)}"></label>`; }).join("")}</div>
             <label class="field">Prix Agglomérés (€/lot)<input type="number" step="0.5" data-mk="${s}" data-mkk="prix" data-m="${i}" value="${esc(mk.prix)}"></label>
             <div class="small" style="margin:4px 0 8px">${n0(mk.prix) ? priceBadge(s, "Agglomérés", n0(mk.prix)) : `<span class="muted">Fourchette ${rg[0]}–${rg[1]} €</span>`}
               ${marge !== null ? ` · marge <b class="${cls(marge)}">${fmtP(marge)}</b>/lot` : ""}
               ${n0(mk.prix) && Number.isFinite(seuilRentable(r).prix) ? (clampPrix(s, "Agglomérés", mk.prix) >= seuilRentable(r).prix ? ` · <span class="badge good">rentable</span>` : ` · <span class="badge warn">sous le seuil (${fmtP(seuilRentable(r).prix)})</span>`) : ""}</div>
             <label class="field">Délai de paiement<select data-mk="${s}" data-mkk="delai" data-m="${i}">${opts(delaiList, mk.delai)}</select></label>
-            <details class="qprix" ${i >= 2 || QS.some((q) => n0(mk["prix" + q])) ? "open" : ""}><summary class="small">Prix bouchons naturels Q1–Q4${QS.some((q) => n0(mk["prix" + q])) ? "" : " (non saisis)"}</summary>
-              <div class="q-grid">${QS.map((q) => { const rq = range(s, q); return `<label class="field">${q} <span class="muted small">${rq ? `${rq[0]}–${rq[1]}` : ""}</span><input type="number" step="0.5" class="sm" data-mk="${s}" data-mkk="prix${q}" data-m="${i}" value="${esc(mk["prix" + q] || 0)}"></label>`; }).join("")}</div>
-            </details>
             <label class="field" style="margin-top:8px">Niveau de publicité (ciblage)${i < 2 ? ` <span class="muted small">(à partir de Mars)</span>` : ""}<select data-mk="${s}" data-mkk="ciblage" data-m="${i}">${opts(CIBLAGES.map(([l], k) => [l, k]), n0(mk.ciblage))}</select></label>
           </div>`;
         }).join("")}
