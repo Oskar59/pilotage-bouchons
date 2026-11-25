@@ -2,7 +2,7 @@
 // Tout est stocké dans le navigateur (localStorage). Partage via export JSON ou lien.
 
 // Numéro de version affiché dans l'en-tête : à augmenter à chaque mise à jour du site
-const APP_VERSION = "2.11";
+const APP_VERSION = "2.12";
 const APP_DATE = "25/11/2026";
 const STORE_KEY = "pilotage-bouchons-v1";
 const KEY_KEY = "pilotage-bouchons-apikey";          // clé Claude (navigateur uniquement)
@@ -71,6 +71,9 @@ Annonce du mois d'avril (mois 4) :
 const SEGMENTS = ["Vignerons", "Caves", "Négociants"];
 const SEG_LABEL = { Vignerons: "Vignerons", Caves: "Caves", "Négociants": "Négociants / Grands comptes" };
 const DELAIS = ["Comptant", "30 jours", "60 jours"];
+// Achats : le jeu compte le délai à partir de la livraison (M+1) ; valeur = nombre de mois après la commande
+const DELAIS_ACHAT = ["Comptant (à la commande)", "À la livraison / 30 jours", "30 j après livraison / 60 jours", "60 j après livraison / 90 jours"];
+const delaiAchat = (k) => DELAIS_ACHAT[n0(k)] || `${n0(k)} mois`;
 const STATUTS = [["Validée (comptée)", "validee"], ["En négociation", "nego"], ["Refusée / annulée", "refusee"]];
 const LIVRAISONS = [["Instantané (distributeur)", 0], ["30 jours (industriel)", 1], ["60 jours", 2]];
 const TRANSPORTS = {
@@ -210,7 +213,7 @@ function migrate(s) {
     ...emptyMonth(m.nom), ...m,
     marketing: { ...emptyMarketing(), ...(m.marketing || {}) },
     livraisons: { ...emptyLivraisons(), ...(m.livraisons || {}) },
-    achats: (m.achats || []).map((a) => ({ livraison: 1, statut: "validee", ...a, produit: normProduit(a.produit), delai: Math.min(2, n0(a.delai)) })),
+    achats: (m.achats || []).map((a) => ({ livraison: 1, statut: "validee", ...a, produit: normProduit(a.produit), delai: Math.min(3, n0(a.delai)) })),
     ventes: (m.ventes || []).map((v) => ({ segment: SEGMENTS.includes(v.segment) ? v.segment : "Vignerons", ...v, produit: normProduit(v.produit), delai: Math.min(2, n0(v.delai)) })),
   }));
   out.months.forEach((m) => SEGMENTS.forEach((sg) => { m.marketing[sg].delai = Math.min(2, n0(m.marketing[sg].delai)); }));
@@ -776,7 +779,7 @@ function negoHtml(c, s, mi) {
     <div class="grid k4">
       <div class="kpi"><div class="label">Prix max pour ${tm} % de marge</div><div class="value">${fmtP(pMaxMarge)}</div><div class="hint">${verdict}</div></div>
       <div class="kpi"><div class="label">Prix max à l'équilibre</div><div class="value">${fmtP(pMaxEq)}</div><div class="hint">au-delà : perte</div></div>
-      <div class="kpi"><div class="label">Lots max sans tréso négative</div><div class="value">${!prix ? "—" : baseMin.v < 0 ? "0" : lo >= 200000 ? "> 200 000" : fmtN(lo)}</div><div class="hint">${baseMin.v < 0 ? `tréso déjà négative en ${esc(baseMin.nom)} sans l'offre` : `à ${fmtP(prix)}, paiement ${DELAIS[n0(s.delai)].toLowerCase()}, jusqu'en ${esc(c.rows[wEnd].nom)}`}</div></div>
+      <div class="kpi"><div class="label">Lots max sans tréso négative</div><div class="value">${!prix ? "—" : baseMin.v < 0 ? "0" : lo >= 200000 ? "> 200 000" : fmtN(lo)}</div><div class="hint">${baseMin.v < 0 ? `tréso déjà négative en ${esc(baseMin.nom)} sans l'offre` : `à ${fmtP(prix)}, paiement ${(s.type === "achat" ? delaiAchat(s.delai) : DELAIS[n0(s.delai)]).toLowerCase()}, jusqu'en ${esc(c.rows[wEnd].nom)}`}</div></div>
       <div class="kpi"><div class="label">Objectif d'ouverture</div><div class="value">${fmtP(Math.min(n0(state.params.prixMarche), pMaxMarge))}</div><div class="hint">prix marché ${fmtP(n0(state.params.prixMarche))}</div></div>
     </div>
     <p class="muted small section-gap">Calcul : prix de vente moyen attendu ${fmtP(P)} (vos prix planifiés, sinon milieu de fourchette, pondérés par la dernière demande) × (1 − ${tm} %) − charges par lot ${fmtP(H)} (salaires, structure, stockage, pub et autres du mois : ${fmtE(charges)} ÷ ${fmtN(vol)} lots ${demandeAttendue(state.currentMonth) ? "de demande attendue" : "de l'offre"}). Marge visée réglable dans l'onglet Coût de revient.${couverture ? ` Cette offre couvre ≈ ${couverture.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} mois de demande.` : ""}</p>
@@ -795,7 +798,7 @@ function fournisseursHtml() {
     x.offres++; if (st === "refusee") x.refus++;
     if (st === "validee") { x.valLots += n0(a.lots); x.valMontant += n0(a.lots) * n0(a.prix); }
     if (n0(a.prix) > 0) x.best = Math.min(x.best, n0(a.prix));
-    x.last = { nom: m.nom, prix: n0(a.prix), delai: DELAIS[n0(a.delai)], st: STATUTS.find((z) => z[1] === st)?.[0] || st, produit: a.produit };
+    x.last = { nom: m.nom, prix: n0(a.prix), delai: delaiAchat(a.delai), st: STATUTS.find((z) => z[1] === st)?.[0] || st, produit: a.produit };
     map.set(f, x);
   }));
   const list = [...map.values()];
@@ -877,7 +880,7 @@ function printDossierIA() {
   const prixSeg = (mm, sg, pr) => (pr === "Agglomérés" ? n0(mm.marketing[sg]?.prix) : n0(mm.marketing[sg]?.["prix" + pr]));
   const fr = (sg, pr) => { const rg = range(sg, pr); return rg ? `${rg[0]}–${rg[1]} €` : "—"; };
   const stockProds = TOUS.filter((x) => r.finP[x] || r.dispoP[x] || (nx && nx.dispoP[x]));
-  const achats = m.achats.map((a) => [esc(STATUTS.find((z) => z[1] === (a.statut || "validee"))?.[0] || ""), esc(a.fournisseur || "—"), esc(a.produit), fmtN(n0(a.lots)), fmtP(n0(a.prix)), esc(LIVRAISONS.find((l) => l[1] === n0(a.livraison))?.[0] || ""), DELAIS[n0(a.delai)], esc(a.transport || "—"), fmtE(n0(a.lots) * n0(a.prix))]);
+  const achats = m.achats.map((a) => [esc(STATUTS.find((z) => z[1] === (a.statut || "validee"))?.[0] || ""), esc(a.fournisseur || "—"), esc(a.produit), fmtN(n0(a.lots)), fmtP(n0(a.prix)), esc(LIVRAISONS.find((l) => l[1] === n0(a.livraison))?.[0] || ""), delaiAchat(a.delai), esc(a.transport || "—"), fmtE(n0(a.lots) * n0(a.prix))]);
   const ventesA = SEGMENTS.map((sg) => [SEG_LABEL[sg], "Agglomérés", fmtP(clampPrix(sg, "Agglomérés", m.marketing[sg].prix)), fmtN(besoin(sg, "Agglomérés", i)), fmtN(n0(m.livraisons[sg].demande)), fmtN(n0(m.livraisons[sg].livre))]);
   const ventesQ = SEGMENTS.flatMap((sg) => QS.map((q) => ({ sg, q, lv: m.livraisonsQ?.[sg]?.[q] }))).filter((x) => x.lv && (n0(x.lv.demande) || n0(x.lv.livre))).map((x) => [SEG_LABEL[x.sg], x.q, fmtP(clampPrix(x.sg, x.q, m.marketing[x.sg]?.["prix" + x.q])), fmtN(besoin(x.sg, x.q, i)), fmtN(n0(x.lv.demande)), fmtN(n0(x.lv.livre))]);
   const rev = revientMois(c, i, "ca");
@@ -1500,6 +1503,7 @@ function niceStep(x) {
 
 const opts = (list, value) => list.map(([label, v]) => `<option value="${v}" ${String(v) === String(value) ? "selected" : ""}>${esc(label)}</option>`).join("");
 const delaiList = DELAIS.map((d, k) => [d, k]);
+const delaiAchatList = DELAIS_ACHAT.map((d, k) => [d, k]);
 function transportSelect(attrs, value, allowEmpty) {
   return `<select ${attrs}>${allowEmpty ? `<option value="" ${!value ? "selected" : ""}>—</option>` : ""}${Object.keys(TRANSPORTS).map((t) => `<option ${t === value ? "selected" : ""}>${t}</option>`).join("")}</select>`;
 }
@@ -1598,7 +1602,7 @@ function renderMois(c) {
           <td class="r">${inp("achats", j, "lots", a.lots)}</td>
           <td class="r">${inp("achats", j, "prix", a.prix, "number", 'step="0.01" class="sm"')} ${(() => { const pm = prixMarcheDe(a.produit); return pm && n0(a.prix) > pm ? `<span class="badge warn" title="Au-dessus du prix moyen marché (${fmtP(pm)})">↑ marché</span>` : ""; })()}</td>
           <td>${sel("achats", j, "livraison", LIVRAISONS, a.livraison)}</td>
-          <td>${sel("achats", j, "delai", delaiList, a.delai)}</td>
+          <td>${sel("achats", j, "delai", delaiAchatList, a.delai)}</td>
           <td>${transportSelect(`data-m="${i}" data-list="achats" data-j="${j}" data-k="transport"`, a.transport)}</td>
           <td class="r">${inp("achats", j, "coutTransport", a.coutTransport, "number", 'class="sm"')}</td>
           <td class="r">${fmtE(n0(a.lots) * n0(a.prix))}</td>
@@ -1754,7 +1758,7 @@ function renderSimu(c) {
         ${s.type === "vente" ? `<label class="field">Segment<select data-simu="segment">${opts(SEGMENTS.map((g) => [SEG_LABEL[g], g]), s.segment)}</select></label>` : `<label class="field">Livraison<select data-simu="livraison">${opts(LIVRAISONS, s.livraison)}</select></label>`}
         <label class="field">Lots<input type="number" data-simu="lots" value="${s.lots}"></label>
         <label class="field">Prix par lot (€)<input type="number" step="0.01" data-simu="prix" value="${s.prix}"></label>
-        <label class="field">${s.type === "achat" ? "Paiement" : "Encaissement"}<select data-simu="delai">${opts(delaiList, s.delai)}</select></label>
+        <label class="field">${s.type === "achat" ? "Paiement" : "Encaissement"}<select data-simu="delai">${opts(s.type === "achat" ? delaiAchatList : delaiList, s.delai)}</select></label>
         <label class="field">Transport${transportSelect('data-simu="transport"', s.transport)}</label>
         <label class="field">Coût transport (€)<input type="number" data-simu="coutTransport" value="${s.coutTransport}"></label>
       </div>
@@ -1856,7 +1860,7 @@ function contextForAI(c) {
       ...Object.fromEntries(SEGMENTS.map((s) => [s, { prixAgglo: n0(m.marketing[s].prix), ...Object.fromEntries(QS.filter((q) => n0(m.marketing[s]["prix" + q])).map((q) => ["prix" + q, n0(m.marketing[s]["prix" + q])])), delaiPaiement: DELAIS[n0(m.marketing[s].delai)], niveauPublicite: CIBLAGES[n0(m.marketing[s].ciblage)][0] }])), publiciteAgglomeres: n0(m.marketing.pub), publiciteBouchonsNaturels: n0(m.marketing.pubNat),
     } : undefined,
     livraisonsParSegment: SEGMENTS.some((sg) => n0(m.livraisons[sg].demande)) ? Object.fromEntries(SEGMENTS.map((sg) => [sg, { demande: n0(m.livraisons[sg].demande), livre: n0(m.livraisons[sg].livre), prixEffectif: clampPrix(sg, "Agglomérés", m.marketing[sg].prix) }])) : undefined,
-    achats: m.achats.map((a) => ({ statut: STATUTS.find((x) => x[1] === (a.statut || "validee"))[0], fournisseur: a.fournisseur, produit: a.produit, lots: n0(a.lots), prix: n0(a.prix), livraison: LIVRAISONS.find((l) => l[1] === n0(a.livraison))?.[0], paiement: DELAIS[n0(a.delai)], transport: a.transport, coutTransport: n0(a.coutTransport) })),
+    achats: m.achats.map((a) => ({ statut: STATUTS.find((x) => x[1] === (a.statut || "validee"))[0], fournisseur: a.fournisseur, produit: a.produit, lots: n0(a.lots), prix: n0(a.prix), livraison: LIVRAISONS.find((l) => l[1] === n0(a.livraison))?.[0], paiement: delaiAchat(a.delai), transport: a.transport, coutTransport: n0(a.coutTransport) })),
     ventes: m.ventes.map((v) => ({ segment: v.segment, client: v.client, produit: v.produit, lots: n0(v.lots), prix: n0(v.prix), encaissement: DELAIS[n0(v.delai)], transport: v.transport || null })),
     autres: m.depenses.map((d) => ({ libelle: d.libelle, montant: n0(d.montant) })),
     notesPlanification: m.planif || undefined, notesNegociation: m.nego || undefined,
