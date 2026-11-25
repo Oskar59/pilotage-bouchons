@@ -1,2 +1,5 @@
 .claude/
 .DS_Store
+
+# Brouillons de fiche (locaux, pas sur le site)
+brouillon_fiche_*.json
