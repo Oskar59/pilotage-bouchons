@@ -2,7 +2,7 @@
 // Tout est stocké dans le navigateur (localStorage). Partage via export JSON ou lien.
 
 // Numéro de version affiché dans l'en-tête : à augmenter à chaque mise à jour du site
-const APP_VERSION = "2.13";
+const APP_VERSION = "2.14";
 const APP_DATE = "25/11/2026";
 const STORE_KEY = "pilotage-bouchons-v1";
 const KEY_KEY = "pilotage-bouchons-apikey";          // clé Claude (navigateur uniquement)
@@ -1397,7 +1397,7 @@ function renderDashboard(c) {
   const alerts = alertsFor(c);
   const el = document.getElementById("tab-dashboard");
   el.innerHTML = `
-    <div class="row between dash-top"><span class="muted small">Mois en cours : <b>${esc(cur.nom)}</b></span><div class="row"><button class="btn" id="dossierIA" title="PDF du mois en cours + prévisions du mois suivant, à donner à une IA">PDF du mois pour l'IA</button><button class="btn ghost" id="promptIA">Copier le prompt</button><button class="btn ghost" id="reportBtn" title="Ouvre l'impression : choisissez « Enregistrer en PDF »">Rapport imprimable (PDF)</button></div></div>
+    <div class="row between dash-top"><span class="muted small">Mois en cours : <b>${esc(cur.nom)}</b></span><div class="row"><button class="btn" id="dossierIA" title="PDF du mois en cours + prévisions du mois suivant, à donner à une IA">PDF du mois pour l'IA</button><button class="btn ghost" id="promptIA">Copier le prompt</button><button class="btn ghost" id="reportBtn" title="Ouvre l'impression : choisissez « Enregistrer en PDF »">Rapport imprimable (PDF)</button><a class="btn ghost" href="diaporama.html" target="_blank" rel="noopener" title="Diaporama de la rencontre actionnaire : à regarder ou télécharger en PDF">Diaporama actionnaire</a></div></div>
     <div class="grid k4">
       <div class="card kpi"><div class="label">Trésorerie fin ${esc(cur.nom)}</div><div class="value ${cls(cur.tresoFin)}">${fmtE(cur.tresoFin)}</div><div class="hint">début de mois : ${fmtE(cur.tresoDebut)}</div></div>
       <div class="card kpi"><div class="label">Stock fin ${esc(cur.nom)}</div><div class="value">${fmtN(cur.lotsFin)} lots</div><div class="hint">valeur ${fmtE(cur.valFin)} · en transit : ${fmtN(cur.transit)}</div></div>

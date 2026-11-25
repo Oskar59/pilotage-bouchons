@@ -296,3 +296,5 @@ td.best { background: var(--good-bg); }
 .inner-card h2 { font-size: 1rem; }
 .q-grid.q-first { grid-template-columns: 1fr; margin: 0 0 8px; }
 .prod-hint { display: block; margin-top: 3px; color: var(--text-2); font-weight: 400; }
+
+a.btn { text-decoration: none; display: inline-flex; align-items: center; }

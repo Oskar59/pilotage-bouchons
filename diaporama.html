@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rencontre actionnaire · point de mai</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&family=Inter:wght@400;600&display=swap">
+<style>
+* { margin: 0; box-sizing: border-box; }
+html, body { background: #1b140d; }
+body { font: 32px/1.2 'Inter', Arial, sans-serif; }
+.stage { width: 1920px; height: 1080px; position: relative; overflow: hidden; transform-origin: top left; }
+.stage > section { width: 1920px; height: 1080px; position: relative; overflow: hidden; }
+h1 { font-size: 96px; font-weight: 600 } h2 { font-size: 64px; font-weight: 600 } h3 { font-size: 44px; font-weight: 600 }
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: .35em .6em; text-align: left; border-bottom: 2px solid #D6C8B2; }
+th { font-weight: 600; }
+.slot { position: relative; margin: 0 auto 24px; }
+.fadeup { animation: none !important; }
+.toolbar { position: sticky; top: 0; z-index: 5; display: flex; gap: 12px; align-items: center; justify-content: center; flex-wrap: wrap; padding: 12px 16px; background: #23190Fee; font: 15px/1.3 system-ui, sans-serif; color: #F6F1E8; }
+.toolbar a, .toolbar button { font: inherit; color: #23190F; background: #F6F1E8; border: 0; border-radius: 8px; padding: 8px 14px; text-decoration: none; cursor: pointer; }
+.toolbar .primary { background: #E0A15B; }
+.notes { max-width: 980px; margin: 0 auto 48px; padding: 16px 20px; background: #F6F1E8; color: #23190F; border-radius: 10px; font: 16px/1.5 system-ui, sans-serif; display: none; }
+.notes p + p { margin-top: 8px; }
+body.shownotes .notes { display: block; }
+@media print {
+  @page { size: 1920px 1080px; margin: 0; }
+  html, body { background: none; }
+  .toolbar, .notes { display: none !important; }
+  .slot { margin: 0; width: 1920px !important; height: 1080px !important; page-break-after: always; break-after: page; }
+  .stage { transform: none !important; }
+  .fadeup { animation: none !important; }
+}
+
+:root {
+  --ink: #23190F;
+  --paper: #F6F1E8;
+  --paper2: #EDE4D4;
+  --cork: #B5702A;
+  --blue: #2C5A78;
+  --muted: #5C4E3F;
+  --line: #D6C8B2;
+  --good: #2F6B45;
+  --bad: #A23B2A;
+}
+body { font-family: 'Inter', Arial, sans-serif; color: var(--ink); }
+section { padding: 128px 128px 160px; background: var(--paper); counter-increment: page; display: flex; flex-direction: column; }
+section.dark { background: var(--ink); color: var(--paper); }
+h1, h2, h3 { font-family: 'Space Grotesk', Arial, sans-serif; color: var(--ink); }
+section.dark h1, section.dark h2, section.dark h3 { color: var(--paper); }
+h2 { font-size: 64px; font-weight: 700; line-height: 1.05; margin-bottom: 40px; }
+h3 { font-size: 32px; font-weight: 700; line-height: 1.15; }
+p { font-size: 26px; line-height: 1.35; }
+.eyebrow { font-size: 24px; font-weight: 600; color: var(--cork); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 16px; }
+.footer { position: absolute; left: 128px; bottom: 64px; width: 1664px; font-size: 24px; color: var(--muted); display: flex; justify-content: space-between; }
+section.dark .footer { color: #CBBBA4; }
+.row { display: flex; gap: 40px; }
+.col { display: flex; flex-direction: column; gap: 24px; }
+.card { background: #FBF8F2; border: 2px solid var(--line); border-radius: 20px; padding: 32px 36px; display: flex; flex-direction: column; gap: 16px; }
+.card.accent { border-color: var(--cork); }
+.card .tag { font-size: 24px; font-weight: 600; color: var(--cork); }
+.card .body { font-size: 26px; color: var(--muted); }
+.big { font-family: 'Space Grotesk', Arial, sans-serif; font-size: 72px; font-weight: 700; line-height: 1; color: var(--ink); }
+.big.cork { color: var(--cork); }
+.big.blue { color: var(--blue); }
+.label { font-size: 24px; color: var(--muted); }
+.stat { display: flex; flex-direction: column; gap: 8px; }
+.seg { display: flex; justify-content: space-between; align-items: center; padding: 18px 0; border-bottom: 2px solid var(--line); }
+.seg .name { font-size: 28px; font-weight: 600; }
+.seg .val { font-size: 28px; font-weight: 600; }
+.pos { color: var(--good); }
+.neg { color: var(--bad); }
+table.t { font-size: 26px; color: var(--ink); width: 1664px; }
+.note { font-size: 24px; color: var(--muted); }
+.quad { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 12px; width: 820px; height: 540px; }
+.qcell { border-radius: 16px; padding: 24px 28px; display: flex; flex-direction: column; gap: 10px; }
+.qcell h3 { font-size: 30px; }
+.qcell p { font-size: 24px; }
+.q-star { background: #F3DDBF; }
+.q-ques { background: #E4ECF1; }
+.q-cow { background: #E9E1D3; }
+.q-dog { background: #EFE9E1; }
+.axis { font-size: 24px; color: var(--muted); }
+.clock { display: flex; flex-direction: column; gap: 14px; width: 760px; }
+.cl { display: flex; gap: 20px; align-items: flex-start; padding: 16px 20px; border-radius: 14px; background: #FBF8F2; border: 2px solid var(--line); }
+.cl.now { border-color: var(--blue); }
+.cl.target { border-color: var(--cork); background: #F7E9D6; }
+.cl .n { font-family: 'Space Grotesk', Arial, sans-serif; font-size: 32px; font-weight: 700; color: var(--cork); width: 72px; flex-shrink: 0; }
+.cl p { font-size: 24px; }
+.action { display: flex; gap: 20px; align-items: flex-start; }
+.action .n { font-family: 'Space Grotesk', Arial, sans-serif; font-size: 36px; font-weight: 700; color: var(--cork); width: 48px; flex-shrink: 0; }
+.action p { font-size: 26px; }
+.goal { background: #FBF8F2; border: 2px solid var(--line); border-radius: 18px; padding: 24px 28px; display: flex; flex-direction: column; gap: 6px; }
+.goal .big { font-size: 56px; }
+.bar { height: 28px; border-radius: 8px; }
+.use { display: flex; flex-direction: column; gap: 10px; }
+.use .top { display: flex; justify-content: space-between; }
+.use .top p { font-size: 26px; }
+section.dark .card { background: #33271B; border-color: #5A4632; }
+section.dark .card .body { color: #E3D6C2; }
+section.dark .label { color: #CBBBA4; }
+section.dark .big { color: var(--paper); }
+section.dark .big.cork { color: #E0A15B; }
+section.dark p { color: #F1E8DA; }
+section.dark .eyebrow { color: #E0A15B; }
+.fadeup { animation: fadeup 600ms ease-out both; animation-delay: calc(var(--i, 0) * 120ms); }
+@keyframes fadeup { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+</style></head>
+<body>
+<div class="toolbar"><b>Rencontre actionnaire · point de mai</b>
+<a class="primary" href="diaporama-actionnaire.pdf" download>Télécharger le PDF</a>
+<button id="notesBtn">Afficher / masquer le texte à dire</button>
+<button id="printBtn">Imprimer</button>
+<a href="./">← Retour au site</a></div>
+<div class="slot"><div class="stage"><section id="diag" data-transition="fade">
+<p class="eyebrow">Point actionnaire · M. EPI · fin mai</p>
+<h2>Deux métiers, une priorité : la valeur</h2>
+<div class="row" style="flex:1">
+<div class="col" style="width:1040px">
+<div class="card fadeup" style="--i:0">
+<p class="tag">DAS 1 · Bouchons agglomérés (négoce)</p>
+<div class="row" style="gap:56px">
+<div class="stat"><p class="big">75 %</p><p class="label">des lots vendus</p></div>
+<div class="stat"><p class="big">43 %</p><p class="label">du chiffre d’affaires</p></div>
+<div class="stat"><p class="big neg">−11 %</p><p class="label">marge sur coût complet</p></div>
+</div>
+<p class="body">Marché mature, prix tirés vers le bas par les grands comptes (10–30 €).</p>
+</div>
+<div class="card accent fadeup" style="--i:1">
+<p class="tag">DAS 2 · Bouchons naturels triés Q1–Q4 (depuis mars)</p>
+<div class="row" style="gap:56px">
+<div class="stat"><p class="big cork">25 %</p><p class="label">des lots vendus</p></div>
+<div class="stat"><p class="big cork">57 %</p><p class="label">du chiffre d’affaires</p></div>
+<div class="stat"><p class="big pos">+17 %</p><p class="label">marge Q2–Q4 (coût complet)</p></div>
+</div>
+<p class="body">Demande en hausse, Q4 en rupture en avril : la valeur est ici.</p>
+</div>
+</div>
+<div class="col fadeup" style="--i:2;width:584px">
+<h3>Nos trois marchés (mai)</h3>
+<div class="seg"><p class="name">Vignerons</p><p class="val pos">+23 %</p></div>
+<div class="seg"><p class="name">Caves</p><p class="val pos">+15 %</p></div>
+<div class="seg"><p class="name">Négociants + appel d’offres</p><p class="val neg">−25 %</p></div>
+<p class="note">Marge sur coût de revient complet, charges réparties au prorata du chiffre d’affaires.</p>
+</div>
+</div>
+<div class="footer"><p>Mai : CA 582 k€ · 11 953 lots · résultat du mois +7 k€</p><p>1 / 5</p></div>
+
+</section>
+</div></div><div class="notes"><b>Texte à dire · diapositive 1</b><p>Bonjour Monsieur EPI. En cinq minutes : notre diagnostic, notre positionnement, la rentabilité de chaque produit, notre plan et une demande de capital.</p><p>Nous avons deux domaines d’activité. Les agglomérés, notre métier historique : trois lots sur quatre, mais une marge négative sur coût complet, parce que les grands comptes imposent des prix entre 10 et 30 euros.</p><p>Depuis le rachat des trieuses en mars, les bouchons naturels triés : un lot sur quatre seulement, mais déjà 57 % du chiffre d’affaires et environ 17 % de marge sur les qualités Q2 à Q4.</p><p>Côté marchés, les Vignerons et les Caves sont rentables ; les Négociants, avec l’appel d’offres de mai, nous coûtent de l’argent. Notre diagnostic est simple : la valeur est dans le naturel, vendu aux Vignerons et aux Caves.</p></div><div class="slot"><div class="stage"><section id="bcg" data-transition="fade">
+<p class="eyebrow">Positionnement</p>
+<h2>Le naturel tire la croissance, l’agglo finance</h2>
+<div class="row" style="gap:84px">
+<div class="col" style="gap:12px">
+<p class="axis">↑ Croissance du marché · ← Part de marché relative</p>
+<div class="quad fadeup" style="--i:0">
+<div class="qcell q-star"><h3>Vedettes</h3><p>Naturels Q2–Q3 : demande forte, marge 19–20 %.</p></div>
+<div class="qcell q-ques"><h3>Dilemmes</h3><p>Q4 : demande supérieure à l’offre, marge 13 %. Q1 : petits volumes, surplus.</p></div>
+<div class="qcell q-cow"><h3>Vaches à lait</h3><p>Agglos Vignerons et Caves : volume régulier, trésorerie.</p></div>
+<div class="qcell q-dog"><h3>Poids morts</h3><p>Agglos Négociants : −5 € par lot, à réduire.</p></div>
+</div>
+<p class="note">Matrice BCG établie par produit et marché, chiffres de mai.</p>
+</div>
+<div class="clock fadeup" style="--i:1">
+<h3>Horloge des stratégies</h3>
+<div class="cl"><p class="n">2</p><p><b>Prix bas</b> · agglos aux Négociants (10–30 €) : on limite.</p></div>
+<div class="cl now"><p class="n">3</p><p><b>Hybride</b> · Caves : prix moyen, qualité triée. Aujourd’hui.</p></div>
+<div class="cl target"><p class="n">4</p><p><b>Différenciation</b> · naturels triés aux Vignerons, marketing ciblé. Notre cible.</p></div>
+<div class="cl"><p class="n">6–8</p><p><b>Zone d’échec</b> · prix trop haut sans valeur : Q4 à 140 € a fait chuter la demande de 59 %.</p></div>
+</div>
+</div>
+<div class="footer"><p>Q4 Vignerons : 470 lots à 120 € en avril, 193 lots à 140 € en mai</p><p>2 / 5</p></div>
+
+</section>
+</div></div><div class="notes"><b>Texte à dire · diapositive 2</b><p>Sur la matrice BCG, nos vedettes sont les bouchons naturels Q2 et Q3 : la demande monte et nous gagnons environ 20 % sur coût complet.</p><p>Le Q4 est un dilemme : la demande dépasse notre offre, mais sa marge est plus faible. Nous sécurisons son approvisionnement avec le Maroc B, qui donne 45 % de Q4 au tri.</p><p>Les agglomérés vendus aux Vignerons et aux Caves sont nos vaches à lait : ils font du volume et de la trésorerie. Les agglomérés vendus aux Négociants sont un poids mort : nous perdons environ 5 euros par lot.</p><p>Sur l’horloge des stratégies, nous quittons le prix bas pour aller vers la différenciation : des bouchons triés par qualité, vendus aux Vignerons avec un marketing ciblé. Nous avons aussi appris la limite : à 140 euros, la demande de Q4 des Vignerons a chuté de 59 %. Nous redescendons vers 120–125 euros.</p></div><div class="slot"><div class="stage"><section id="rentab" data-transition="fade">
+<p class="eyebrow">Rentabilité · outil Coût de revient, mai</p>
+<h2>Chaque produit a son prix plancher</h2>
+<table class="t" style="font-size:25px">
+<tr><th style="width:12%">Produit</th><th style="width:15%;text-align:right">Coût de revient / lot</th><th style="width:12%;text-align:right">Prix moyen</th><th style="width:12%;text-align:right">Marge / lot</th><th style="width:9%;text-align:right">Marge</th><th style="width:40%">Décision prise</th></tr>
+<tr><td>Agglomérés</td><td style="text-align:right">30,86 €</td><td style="text-align:right">27,81 €</td><td style="text-align:right;color:#A23B2A">−3,04 €</td><td style="text-align:right;color:#A23B2A">−11 %</td><td>Moins de volume aux Négociants (30 € max) ; priorité aux Caves (40 €) et Vignerons (55 €)</td></tr>
+<tr><td>Q1</td><td style="text-align:right">87,59 €</td><td style="text-align:right">75,24 €</td><td style="text-align:right;color:#A23B2A">−12,35 €</td><td style="text-align:right;color:#A23B2A">−16 %</td><td>Perte due à 500 lots cédés à 22,50 € ; aux Vignerons, +30 %. Plus aucune vente sous 60 €</td></tr>
+<tr><td>Q2</td><td style="text-align:right">109,47 €</td><td style="text-align:right">137,32 €</td><td style="text-align:right;color:#2F6B45">+27,85 €</td><td style="text-align:right;color:#2F6B45">+20 %</td><td>Produit à développer : Vignerons et Caves</td></tr>
+<tr><td>Q3</td><td style="text-align:right">106,10 €</td><td style="text-align:right">130,70 €</td><td style="text-align:right;color:#2F6B45">+24,60 €</td><td style="text-align:right;color:#2F6B45">+19 %</td><td>Produit à développer ; surplus revendu 65 € minimum aux distributeurs</td></tr>
+<tr><td>Q4</td><td style="text-align:right">96,67 €</td><td style="text-align:right">110,73 €</td><td style="text-align:right;color:#2F6B45">+14,06 €</td><td style="text-align:right;color:#2F6B45">+13 %</td><td>Plus de Q4 aux Négociants (90 €) ; 120–125 € aux Vignerons ; Maroc B pour l’offre</td></tr>
+</table>
+<p class="note" style="margin-top:28px">Coût de revient complet = coût d’achat ou de production (matière + 2 € de tri) + charges du mois réparties au prorata du CA. C’est notre prix plancher pour les ventes aux clients. Pour écouler un surplus, le plancher est le coût variable + taxe : ≈ 60 € (Q1–Q4), ≈ 21 € (agglos).</p>
+<div class="footer"><p>Mai : CA 582 k€ · coût de revient 572 k€ · résultat analytique +10 k€ (1,8 %)</p><p>3 / 5</p></div>
+
+</section>
+</div></div><div class="notes"><b>Texte à dire · diapositive 3</b><p>Voici la rentabilité de nos produits en mai, calculée avec l’outil Coût de revient : coût d’achat ou de production, plus les charges du mois réparties au prorata du chiffre d’affaires.</p><p>Les agglomérés nous coûtent 30,86 euros par lot et se vendent en moyenne 27,81 euros : nous perdons 3 euros par lot, à cause des Négociants plafonnés à 30 euros. Décision : moins de volume chez eux, priorité aux Caves et aux Vignerons.</p><p>Le Q1 est en perte uniquement à cause de 500 lots cédés à 22,50 euros lors de l’appel d’offres, une erreur que nous assumons. Vendu aux Vignerons, il rapporte 30 %. Nouvelle règle : aucune vente sous 60 euros.</p><p>Q2 et Q3 rapportent 20 % : ce sont les produits à développer. Le Q4 rapporte 13 % : nous arrêtons de le vendre 90 euros aux Négociants et sécurisons son approvisionnement.</p><p>Au total, en mai, 582 000 euros de chiffre d’affaires pour 572 000 euros de coût de revient : nous sommes à l’équilibre, et chaque décision ici vise à faire monter cette marge.</p></div><div class="slot"><div class="stage"><section id="plan" data-transition="fade">
+<p class="eyebrow">Plan d’actions à moyen terme</p>
+<h2>Cinq actions, quatre objectifs pour décembre</h2>
+<div class="row" style="gap:72px">
+<div class="col fadeup" style="--i:0;width:900px;gap:22px">
+<div class="action"><p class="n">1</p><p><b>Recentrer les ventes</b> sur les naturels pour les Vignerons et les Caves.</p></div>
+<div class="action"><p class="n">2</p><p><b>Sécuriser le Q4</b> : Maroc B (45 % de Q4 au tri) et contrats de volume avec pénalités.</p></div>
+<div class="action"><p class="n">3</p><p><b>Agglos rentables seulement</b> : prix au-dessus de 31 €, volume réduit aux Négociants.</p></div>
+<div class="action"><p class="n">4</p><p><b>Écouler le surplus Q1–Q3</b> : appels d’offres et distributeurs, 60 € minimum.</p></div>
+<div class="action"><p class="n">5</p><p><b>Piloter la trésorerie</b> : clients comptant, fournisseurs 30 jours après livraison.</p></div>
+</div>
+<div class="col fadeup" style="--i:1;width:692px;gap:20px">
+<div class="row" style="gap:20px">
+<div class="goal" style="width:336px"><p class="big">650 k€</p><p class="label">CA mensuel (mai : 582 k€)</p></div>
+<div class="goal" style="width:336px"><p class="big">10 %</p><p class="label">marge sur coût complet (mai : 1,8 %)</p></div>
+</div>
+<div class="row" style="gap:20px">
+<div class="goal" style="width:336px"><p class="big cork">+200 k€</p><p class="label">résultat cumulé fin décembre (fin mai : −28 k€)</p></div>
+<div class="goal" style="width:336px"><p class="big blue">95 %</p><p class="label">Q4 livrés (avril : 59 %, mai : 100 %)</p></div>
+</div>
+<p class="note">Et une trésorerie positive à chaque fin de mois dès juillet.</p>
+</div>
+</div>
+<div class="footer"><p>Objectifs à horizon de l’année</p><p>4 / 5</p></div>
+
+</section>
+</div></div><div class="notes"><b>Texte à dire · diapositive 4</b><p>Notre plan tient en cinq actions.</p><p>Un : recentrer nos ventes sur les bouchons naturels, pour les Vignerons et les Caves, nos clients rentables.</p><p>Deux : sécuriser le Q4, avec le Maroc B qui donne 45 % de Q4 au tri, et des contrats de volume avec nos industriels, avec des pénalités écrites.</p><p>Trois : ne vendre d’agglomérés qu’à un prix rentable, au-dessus de 31 euros, et réduire le volume aux Négociants.</p><p>Quatre : écouler les Q1 à Q3 en trop par les appels d’offres et les ventes entre distributeurs, jamais sous 60 euros.</p><p>Cinq : piloter la trésorerie, avec des clients qui paient comptant et des fournisseurs payés 30 jours après la livraison.</p><p>Nos objectifs pour décembre : 650 000 euros de chiffre d’affaires par mois, 10 % de marge sur coût complet, un résultat cumulé de plus 200 000 euros, 95 % des Q4 livrés, et une trésorerie positive chaque mois dès juillet.</p></div><div class="slot"><div class="stage"><section id="capital" class="dark">
+<p class="eyebrow">Demande de capitalisation</p>
+<h2>500 k€ pour financer la croissance du naturel</h2>
+<div class="row" style="gap:72px">
+<div class="col fadeup" style="--i:0;width:820px;gap:28px">
+<div class="use"><div class="top"><p><b>Stock et délais clients (BFR)</b></p><p><b>300 k€</b></p></div><div class="bar" style="width:820px;background:#E0A15B"></div><p class="label">Deux mois de matière Maroc B / Espagne A pour ne plus manquer de Q4</p></div>
+<div class="use"><div class="top"><p><b>Contrats fournisseurs long terme</b></p><p><b>120 k€</b></p></div><div class="bar" style="width:328px;background:#7FA7C2"></div><p class="label">Payer à la commande contre 3 à 5 € de moins par lot</p></div>
+<div class="use"><div class="top"><p><b>Marketing ciblé Vignerons et Caves</b></p><p><b>80 k€</b></p></div><div class="bar" style="width:219px;background:#CBBBA4"></div><p class="label">E-mailing et visites d’usine, pas de démonstrations à 100 k€</p></div>
+</div>
+<div class="col fadeup" style="--i:1;width:772px;gap:22px">
+<h3>Pourquoi nous faire confiance</h3>
+<div class="card"><p class="body"><b>Une trésorerie négative qui est du stock, pas des pertes</b> : 705 k€ de stock et de commandes en route fin mai.</p></div>
+<div class="card"><p class="body"><b>Une activité qui redevient bénéficiaire</b> : +30 k€ en avril, +7 k€ en mai, contre −25 k€ en mars.</p></div>
+<div class="card"><p class="body"><b>Une demande que nous ne servons pas encore</b> : 529 Q4 perdus en avril, 20 % de marge sur Q2–Q3.</p></div>
+</div>
+</div>
+<div class="footer"><p>Merci · vos questions</p><p>5 / 5</p></div>
+
+</section>
+</div></div><div class="notes"><b>Texte à dire · diapositive 5</b><p>Pour finir, nous demandons 500 000 euros de capital supplémentaire.</p><p>300 000 euros financeront notre besoin en fonds de roulement : deux mois de matière Maroc B et Espagne A, pour ne plus jamais manquer de Q4, et la possibilité d’accorder des délais à nos meilleurs clients.</p><p>120 000 euros nous permettront de signer des contrats longs avec nos industriels, payés à la commande, en échange de 3 à 5 euros de moins par lot.</p><p>80 000 euros iront au marketing ciblé vers les Vignerons et les Caves. Nous écartons volontairement les démonstrations à 100 000 euros, trop chères pour ce qu’elles rapportent.</p><p>Pourquoi nous faire confiance ? Notre trésorerie négative correspond à 705 000 euros de stock et de commandes, pas à des pertes. L’activité est redevenue bénéficiaire depuis avril. Et la demande est là : en avril, nous avons refusé 529 lots de Q4 faute de stock.</p><p>Merci, nous sommes prêts pour vos questions.</p></div>
+<script>
+function fit(){ const w=Math.min(window.innerWidth-32,1600); const k=w/1920;
+  document.querySelectorAll('.slot').forEach(s=>{s.style.width=1920*k+'px'; s.style.height=1080*k+'px'; s.firstElementChild.style.transform='scale('+k+')';}); }
+window.addEventListener('resize',fit); fit();
+document.getElementById('notesBtn').onclick=()=>{document.body.classList.toggle('shownotes'); fit();};
+document.getElementById('printBtn').onclick=()=>window.print();
+</script>
+</body></html>
