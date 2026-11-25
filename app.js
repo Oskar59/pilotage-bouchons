@@ -2,7 +2,7 @@
 // Tout est stocké dans le navigateur (localStorage). Partage via export JSON ou lien.
 
 // Numéro de version affiché dans l'en-tête : à augmenter à chaque mise à jour du site
-const APP_VERSION = "2.2";
+const APP_VERSION = "2.3";
 const APP_DATE = "25/11/2026";
 const STORE_KEY = "pilotage-bouchons-v1";
 const KEY_KEY = "pilotage-bouchons-apikey";          // clé Claude (navigateur uniquement)
@@ -767,6 +767,118 @@ function printReport() {
   setTimeout(() => window.print(), 50);
 }
 
+// ---------- dossier IA du mois (PDF) + prompt ----------
+function promptIA() {
+  const i = state.currentMonth, cur = state.months[i], nx = state.months[i + 1];
+  const nomNx = nx ? nx.nom : "le mois suivant";
+  return `Tu es le conseiller stratégique de notre équipe dans le jeu d'entreprise Vinego (simulateur de négociation commerciale). Nous sommes un DISTRIBUTEUR de bouchons de liège. Le PDF joint (« Dossier IA · ${cur.nom} ») contient toutes nos données : règles du jeu, situation à fin ${cur.nom}, décisions prises ce mois-ci, prévisions pour ${nomNx}, besoins clients annoncés, stock, trésorerie et coûts.
+
+Ce qui a changé depuis le début du jeu (à bien prendre en compte) :
+- Au départ nous ne vendions que des bouchons AGGLOMÉRÉS (achetés aux industriels, revendus aux Vignerons, Caves et Négociants / Grands comptes).
+- Depuis Mars : notre fournisseur historique allemand STECKER est en liquidation judiciaire, il ne fait plus d'offres. Il faut négocier avec les fournisseurs français et les autres distributeurs.
+- Nous avons racheté ses trieuses (30 000 € comptant, amorties sur 5 ans) et son stock de bouchons naturels (285 000 € payés en Mars). Nouvelle activité : acheter des bouchons naturels tubés (Espagne A, B, C), les TRIER (2 € par lot ; chaque matière donne des qualités Q1 à Q4 selon des pourcentages fixes), puis les vendre aux clients ou à d'autres distributeurs.
+- Les salaires sont passés de 40 000 € à 150 000 € par mois à partir de Mars : nos charges fixes sont beaucoup plus lourdes.
+- En planification, chaque segment a maintenant des prix pour Q1, Q2, Q3, Q4 et Agglomérés, un délai de paiement, et un « niveau de publicité » ciblé (Aucune, Flyers 10 000 €, E-mailing 20 000 €, Visite de l'usine 50 000 €). Il y a deux budgets pub : bouchons naturels et agglomérés.
+- Les besoins clients et les fourchettes de prix par produit sont annoncés dans le PDF. Nous ne sommes pas obligés de servir tous les clients.
+
+Règles importantes : un achat chez un industriel arrive le mois suivant (M+1) mais il est facturé à la commande ; un achat à un distributeur est instantané ; un prix hors fourchette est ramené au minimum ou au maximum ; la demande non servie part chez les concurrents ; stockage = 0,33 % de la valeur du stock de fin de mois ; la trésorerie ne doit JAMAIS être négative.
+
+Ce que nous te demandons :
+1. PLANIFICATION de ${nomNx} : pour chaque segment (Vignerons, Caves, Négociants / Grands comptes), le prix de chaque produit (Agglomérés, Q1, Q2, Q3, Q4) dans la fourchette, le délai de paiement, le niveau de publicité, et les deux budgets de publicité. Dis quels segments / produits viser ou abandonner et pourquoi (marge, volume, trésorerie).
+2. NÉGOCIATIONS : quoi acheter (produit, quantité, prix maximum à accepter, prix d'ouverture, délai de paiement à demander, transport), combien de matière trier et laquelle (Espagne A, B ou C), et les arguments à utiliser face aux fournisseurs.
+3. TRÉSORERIE : vérifie qu'elle reste positive avec ces décisions ; sinon, propose quoi ajuster.
+4. Les 3 plus gros risques et ce qu'il faut surveiller.
+
+Réponds en français, de façon chiffrée et concrète. Commence par un tableau récapitulatif prêt à saisir dans Vinego (planification puis achats), puis explique en quelques puces. Si une information te manque, dis précisément laquelle.`;
+}
+async function copyPromptIA() {
+  const ok = await copyText(promptIA());
+  toast(ok ? "Prompt copié : collez-le dans l'IA avec le PDF en pièce jointe" : "Copie impossible dans ce navigateur");
+}
+function printDossierIA() {
+  const c = compute(state);
+  const i = state.currentMonth, m = state.months[i], r = c.rows[i];
+  const nx = c.rows[i + 1], mNx = state.months[i + 1];
+  const P = ["Agglomérés", ...QS];
+  const tbl = (head, rows) => `<table><thead><tr>${head.map((h, k) => `<th${k ? ' class="r"' : ""}>${h}</th>`).join("")}</tr></thead><tbody>${rows.map((rw) => `<tr>${rw.map((x, k) => `<td${k ? ' class="r"' : ""}>${x}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+  const prixSeg = (mm, sg, pr) => (pr === "Agglomérés" ? n0(mm.marketing[sg]?.prix) : n0(mm.marketing[sg]?.["prix" + pr]));
+  const fr = (sg, pr) => { const rg = range(sg, pr); return rg ? `${rg[0]}–${rg[1]} €` : "—"; };
+  const stockProds = TOUS.filter((x) => r.finP[x] || r.dispoP[x] || (nx && nx.dispoP[x]));
+  const achats = m.achats.map((a) => [esc(STATUTS.find((z) => z[1] === (a.statut || "validee"))?.[0] || ""), esc(a.fournisseur || "—"), esc(a.produit), fmtN(n0(a.lots)), fmtP(n0(a.prix)), esc(LIVRAISONS.find((l) => l[1] === n0(a.livraison))?.[0] || ""), DELAIS[n0(a.delai)], esc(a.transport || "—"), fmtE(n0(a.lots) * n0(a.prix))]);
+  const ventesA = SEGMENTS.map((sg) => [SEG_LABEL[sg], "Agglomérés", fmtP(clampPrix(sg, "Agglomérés", m.marketing[sg].prix)), fmtN(besoin(sg, "Agglomérés", i)), fmtN(n0(m.livraisons[sg].demande)), fmtN(n0(m.livraisons[sg].livre))]);
+  const ventesQ = SEGMENTS.flatMap((sg) => QS.map((q) => ({ sg, q, lv: m.livraisonsQ?.[sg]?.[q] }))).filter((x) => x.lv && (n0(x.lv.demande) || n0(x.lv.livre))).map((x) => [SEG_LABEL[x.sg], x.q, fmtP(clampPrix(x.sg, x.q, m.marketing[x.sg]?.["prix" + x.q])), fmtN(besoin(x.sg, x.q, i)), fmtN(n0(x.lv.demande)), fmtN(n0(x.lv.livre))]);
+  const rev = revientMois(c, i, "ca");
+  const cuG = rev.global.lots ? rev.global.cout / rev.global.lots : NaN;
+  const futur = c.rows.slice(i, Math.min(c.rows.length, i + 4));
+  const besoinsCard = besoinsHtml(c, i);
+  const nego = (() => { const sv = { ...ui.simu, type: "achat", mois: i, produit: "Agglomérés", lots: Math.max(1000, Math.round(demandeAttendue(i))), prix: n0(state.params.prixMarche), delai: 0, livraison: 1 }; try { return negoHtml(c, sv, i); } catch { return ""; } })();
+  const rep = document.getElementById("report");
+  rep.innerHTML = `
+    <h1>Dossier IA · ${esc(m.nom)} → préparer ${esc(nx?.nom || "la suite")}</h1>
+    <p class="muted">${esc(state.team || "Notre entreprise")} · distributeur de bouchons de liège (jeu Vinego) · édité le ${new Date().toLocaleDateString("fr-FR")} · version du site ${APP_VERSION}</p>
+
+    <h2>0. Prompt à donner à l'IA</h2>
+    <div class="card"><p class="small" style="white-space:pre-wrap">${esc(promptIA())}</p></div>
+
+    <h2>1. Situation à fin ${esc(m.nom)}</h2>
+    <div class="card">${tbl(["Indicateur", "Valeur"], [
+      ["Trésorerie début / fin du mois", `${fmtE(r.tresoDebut)} / <b>${fmtE(r.tresoFin)}</b>`],
+      ["Trésorerie minimale prévue (avec les saisies actuelles)", `${fmtE(c.minTreso)} en ${esc(c.rows[c.minTresoMonth]?.nom || "—")}`],
+      ["Chiffre d'affaires / résultat du mois", `${fmtE(r.ca)} / ${fmtE(r.resultat)}`],
+      ["Résultat cumulé", fmtE(r.cumRes)],
+      ["Charges du mois", `salaires ${fmtE(r.salaires)} · structure ${fmtE(r.structure)} · stockage ${fmtE(r.stockage)} · pub ${fmtE(r.pub)} · fabrication ${fmtE(r.fabrication)} · amortissements ${fmtE(r.dotations)} · autres ${fmtE(r.divers - r.pub)}`],
+      ["Coût de revient moyen par lot vendu", fmtP(cuG)],
+      ["Encaissements clients à venir / paiements fournisseurs à venir", `${fmtE(c.aEncaisser)} / ${fmtE(c.aPayer)}`],
+    ])}</div>
+
+    <h2>2. Stock</h2>
+    <div class="card">${tbl(["Produit", `Fin ${esc(m.nom)} (lots)`, "Coût moyen", "Valeur", nx ? `Disponible début ${esc(nx.nom)}` : "—"], stockProds.map((x) => [x, fmtN(r.finP[x]), r.finP[x] ? fmtP(r.cmupP[x]) : "—", fmtE(Math.max(0, r.finP[x]) * r.cmupP[x]), nx ? fmtN(nx.dispoP[x]) : "—"]))}</div>
+
+    <h2>3. Décisions de ${esc(m.nom)}</h2>
+    <div class="card">
+      <h3>Planification</h3>
+      ${tbl(["Segment", ...P.map((pr) => `Prix ${pr === "Agglomérés" ? "Agglo" : pr}`), "Délai", "Niveau de pub"], SEGMENTS.map((sg) => [SEG_LABEL[sg], ...P.map((pr) => prixSeg(m, sg, pr) ? fmtP(clampPrix(sg, pr, prixSeg(m, sg, pr))) : "—"), DELAIS[n0(m.marketing[sg].delai)], CIBLAGES[n0(m.marketing[sg].ciblage)][0]]))}
+      <p class="small">Publicité agglomérés ${fmtE(n0(m.marketing.pub))} · publicité bouchons naturels ${fmtE(n0(m.marketing.pubNat))} · niveaux de pub ciblés ${fmtE(r.ciblage)}</p>
+      <h3>Ventes (étape A)</h3>
+      ${tbl(["Segment", "Produit", "Prix effectif", "Besoin annoncé", "Demande reçue", "Livré"], [...ventesA, ...ventesQ])}
+      ${m.ventes.length ? `<h3>Autres ventes</h3>${tbl(["Segment", "Produit", "Lots", "Prix", "Encaissement"], m.ventes.map((v) => [esc(SEG_LABEL[v.segment] || v.segment), esc(v.produit), fmtN(n0(v.lots)), fmtP(n0(v.prix)), DELAIS[n0(v.delai)]]))}` : ""}
+      <h3>Achats / négociations (étape B)</h3>
+      ${achats.length ? tbl(["Statut", "Fournisseur", "Produit", "Lots", "Prix", "Livraison", "Paiement", "Transport", "Total"], achats) : "<p class='small'>Aucun achat saisi.</p>"}
+      ${(m.production || []).length ? `<h3>Production (tri)</h3>${tbl(["Matière", "Lots triés"], m.production.map((x) => [esc(x.matiere), fmtN(n0(x.lots))]))}<p class="small">Produit : ${QS.map((q) => `${q} ${fmtN(r.prodOut[q])}`).join(" · ")}</p>` : ""}
+      ${m.depenses.length ? `<h3>Autres dépenses / recettes</h3>${tbl(["Libellé", "Montant"], m.depenses.map((d) => [esc(d.libelle || "—"), fmtE(n0(d.montant))]))}` : ""}
+      ${m.planif || m.nego ? `<h3>Notes de l'équipe</h3>${m.planif ? `<p class="small"><b>Planification :</b> ${esc(m.planif).replace(/\n/g, "<br>")}</p>` : ""}${m.nego ? `<p class="small"><b>Négociation :</b> ${esc(m.nego).replace(/\n/g, "<br>")}</p>` : ""}` : ""}
+    </div>
+
+    <h2>4. Préparer ${esc(nx?.nom || "le mois suivant")}</h2>
+    ${mNx ? `<div class="card"><h3>Besoins clients annoncés et fourchettes de prix</h3>
+      ${tbl(["Segment", ...P.map((pr) => (pr === "Agglomérés" ? "Agglo" : pr))], SEGMENTS.map((sg) => [SEG_LABEL[sg], ...P.map((pr) => `${fmtN(besoin(sg, pr, i + 1))} lots<br><span class="muted small">${fr(sg, pr)}</span>`)]))}</div>` : ""}
+    ${besoinsCard}
+    ${nego}
+    <div class="card"><h3>Trésorerie prévue (avec les saisies actuelles)</h3>
+      ${tbl(["Mois", "Encaissements", "Décaissements", "Trésorerie fin"], futur.map((x) => [esc(x.nom), fmtE(x.encaissements), fmtE(x.decaissements), fmtE(x.tresoFin)]))}
+      <p class="small muted">Les mois futurs n'ont pas encore de ventes saisies : leur trésorerie est pessimiste (charges sans recettes).</p></div>
+
+    <h2>5. Paramètres utiles</h2>
+    <div class="card">
+      ${tbl(["Matière", "Q1", "Q2", "Q3", "Q4", "Prix d'achat moyen"], MATIERES.filter((x) => state.production.prixMarche[x] || r.finP[x]).map((x) => [x, ...(state.production.rendements[x] || []).map((v) => v + " %"), state.production.prixMarche[x] ? fmtP(state.production.prixMarche[x]) : "—"]))}
+      <p class="small">Frais de tri ${fmtP(n0(state.production.frais))} par lot en entrée${n0(state.production.capacite) ? ` · capacité de tri ${fmtN(state.production.capacite)} lots/mois` : ""} · prix marché agglomérés ${fmtP(n0(state.params.prixMarche))} · stockage ${r.stockageRate} %</p>
+    </div>
+
+    <h2>6. Diagnostic automatique du site</h2>
+    <div class="card"><ul>${adviceRules(c).map((a) => `<li>${a.t}</li>`).join("")}</ul></div>
+
+    <h2>7. Règles et informations du jeu</h2>
+    <div class="card"><p class="small" style="white-space:pre-wrap">${esc(state.rules)}</p></div>`;
+  rep.querySelectorAll("button, input, select").forEach((x) => x.remove());
+  const html = document.documentElement, prevTheme = html.dataset.theme;
+  html.dataset.theme = "light";
+  const prevTitle = document.title;
+  document.title = `Dossier IA - ${m.nom}`; // nom proposé pour le fichier PDF
+  const done = () => { if (prevTheme) html.dataset.theme = prevTheme; else delete html.dataset.theme; document.title = prevTitle; rep.innerHTML = ""; window.removeEventListener("afterprint", done); };
+  window.addEventListener("afterprint", done);
+  setTimeout(() => window.print(), 50);
+}
+
 // ---------- coût de revient (méthode des coûts complets) ----------
 // Coûts de production = lots vendus × CMUP ; transport d'une vente = charge directe de la ligne ;
 // charges indirectes (salaires, structure, stockage, pub, transport achats, autres) réparties par clé (CA ou lots).
@@ -1147,7 +1259,7 @@ function renderDashboard(c) {
   const alerts = alertsFor(c);
   const el = document.getElementById("tab-dashboard");
   el.innerHTML = `
-    <div class="row between dash-top"><span class="muted small">Mois en cours : <b>${esc(cur.nom)}</b></span><button class="btn ghost" id="reportBtn" title="Ouvre l'impression : choisissez « Enregistrer en PDF »">Rapport imprimable (PDF)</button></div>
+    <div class="row between dash-top"><span class="muted small">Mois en cours : <b>${esc(cur.nom)}</b></span><div class="row"><button class="btn" id="dossierIA" title="PDF du mois en cours + prévisions du mois suivant, à donner à une IA">PDF du mois pour l'IA</button><button class="btn ghost" id="promptIA">Copier le prompt</button><button class="btn ghost" id="reportBtn" title="Ouvre l'impression : choisissez « Enregistrer en PDF »">Rapport imprimable (PDF)</button></div></div>
     <div class="grid k4">
       <div class="card kpi"><div class="label">Trésorerie fin ${esc(cur.nom)}</div><div class="value ${cls(cur.tresoFin)}">${fmtE(cur.tresoFin)}</div><div class="hint">début de mois : ${fmtE(cur.tresoDebut)}</div></div>
       <div class="card kpi"><div class="label">Stock fin ${esc(cur.nom)}</div><div class="value">${fmtN(cur.lotsFin)} lots</div><div class="hint">valeur ${fmtE(cur.valFin)} · en transit : ${fmtN(cur.transit)}</div></div>
@@ -1712,6 +1824,7 @@ function renderIA(c) {
         ${key ? `<p class="muted small">Clé ${prov === "gemini" ? "Gemini" : "Claude"} enregistrée dans ce navigateur uniquement. <button class="btn ghost" id="forgetKey" style="padding:2px 8px">Oublier la clé</button></p>`
         : `<p class="small">${keyHelp} La clé reste <b>uniquement dans votre navigateur</b> (jamais dans l'export, le lien ou la synchronisation).</p>
            <div class="row"><input type="password" id="apiKey" placeholder="${prov === "gemini" ? "AIza…" : "sk-ant-…"}" style="flex:1"><button class="btn" id="saveKey">Enregistrer</button></div>`}
+        <div class="alert info"><span class="ico">⎙</span><span><b>Avec un PDF :</b> <button class="btn ghost" id="dossierIA" style="padding:2px 8px">PDF du mois pour l'IA</button> puis <button class="btn ghost" id="promptIA" style="padding:2px 8px">Copier le prompt</button>. Joignez le PDF dans Claude.ai, Gemini ou ChatGPT et collez le prompt : il explique le jeu, les changements depuis mars et ce qu'on attend (planification et négociations du mois suivant).</span></div>
         <div class="alert info"><span class="ico">⧉</span><span><b>Sans clé :</b> <button class="btn ghost" id="copyAI" style="padding:2px 8px">Copier pour l'IA</button> copie vos données + les règles + la question écrite en bas. Collez ensuite dans Claude.ai, Gemini ou ChatGPT (gratuits).</span></div>
         <p class="muted small" style="margin:8px 0 0">Questions rapides (un clic : ${key ? "envoyée à l'IA" : "copiée pour l'IA"}) :</p>
         <div class="suggestions">
@@ -2020,6 +2133,8 @@ document.addEventListener("click", (e) => {
     }
     case "copyAI": copyForAI(document.getElementById("chatInput")?.value || ""); break;
     case "reportBtn": printReport(); break;
+    case "dossierIA": printDossierIA(); break;
+    case "promptIA": copyPromptIA(); break;
     case "autoAlloc": {
       const i = ui.editMonth, m = state.months[i];
       SEGMENTS.forEach((sg) => { m.livraisons[sg].livre = 0; });

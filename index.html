@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Pilotage Bouchons</title>
   <meta name="description" content="Suivi de trésorerie, de stock et conseiller stratégique pour le jeu d'entreprise (distributeur de bouchons de liège).">
-  <link rel="stylesheet" href="style.css?v=2.2">
+  <link rel="stylesheet" href="style.css?v=2.3">
 </head>
 <body>
   <header class="topbar">
@@ -220,6 +220,7 @@
           <tr><th>Prévu / réalisé</th><td>Saisie du mois. « Figer la prévision » enregistre une photo des chiffres attendus (demande et CA estimés avec vos prix, lots vendables, résultat estimé). Les valeurs prévues sont modifiables. Le réalisé se remplit quand vous saisissez la demande et les ventes ; l'écart montre où la prévision s'est trompée.</td></tr>
           <tr><th>Jusqu'où négocier ?</th><td>Simulateur d'offre, type « Achat ». <i>Prix max pour X % de marge</i> = prix de vente moyen attendu × (1 − X %) − charges par lot. <i>Prix max à l'équilibre</i> = prix de vente moyen − charges par lot. Prix de vente moyen = vos prix planifiés (sinon milieu de fourchette) pondérés par la dernière demande de chaque segment. Charges par lot = (salaires + structure + stockage + pub + autres du mois) ÷ demande attendue. <i>Lots max</i> = plus grande quantité achetable au prix et délai saisis sans trésorerie négative sur tout l'horizon. <i>Objectif d'ouverture</i> = le plus bas entre le prix marché et le prix max. Le tableau compare comptant / 30 / 60 jours pour la même offre.</td></tr>
           <tr><th>Historique des fournisseurs</th><td>Simulateur d'offre. Regroupe tous les achats saisis par fournisseur : nombre d'offres (et refusées), lots validés, prix moyen validé, meilleur prix vu, dernière offre.</td></tr>
+          <tr><th>PDF du mois pour l'IA</th><td>Bouton en haut du tableau de bord et dans le Conseiller IA. Crée un dossier du <b>mois en cours</b> (situation, stock, décisions de planification et de négociation, ventes, production, notes) et de la préparation du <b>mois suivant</b> (besoins annoncés, fourchettes, quoi acheter, jusqu'où négocier, trésorerie prévue), avec les paramètres, le diagnostic et les règles du jeu. Choisissez « Enregistrer en PDF ». <b>Copier le prompt</b> copie le texte à donner à l'IA : il explique le jeu, les changements depuis mars (STECKER, bouchons naturels, tri, salaires, niveaux de pub) et demande la planification, les négociations, la trésorerie et les risques. Joignez le PDF dans Claude.ai, Gemini ou ChatGPT, puis collez le prompt.</td></tr>
           <tr><th>Rapport imprimable</th><td>Bouton en haut du tableau de bord. Ouvre l'impression avec synthèse, graphique, récapitulatif mensuel, coût de revient, stock, RSE, diagnostic et notes. Choisissez « Enregistrer en PDF » comme imprimante.</td></tr>
         </tbody></table>
       </div>
@@ -288,6 +289,6 @@
   <div id="toast" class="toast" hidden></div>
   <section id="report" class="report" aria-hidden="true"></section>
 
-  <script type="module" src="app.js?v=2.2"></script>
+  <script type="module" src="app.js?v=2.3"></script>
 </body>
 </html>
