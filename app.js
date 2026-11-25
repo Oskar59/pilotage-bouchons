@@ -2,8 +2,8 @@
 // Tout est stocké dans le navigateur (localStorage). Partage via export JSON ou lien.
 
 // Numéro de version affiché dans l'en-tête : à augmenter à chaque mise à jour du site
-const APP_VERSION = "2.0";
-const APP_DATE = "24/11/2026";
+const APP_VERSION = "2.1";
+const APP_DATE = "25/11/2026";
 const STORE_KEY = "pilotage-bouchons-v1";
 const KEY_KEY = "pilotage-bouchons-apikey";          // clé Claude (navigateur uniquement)
 const GEM_KEY = "pilotage-bouchons-geminikey";       // clé Gemini (navigateur uniquement)
@@ -18,6 +18,33 @@ let cloudInvited = false;
 const CLOUD_DEFAULT = { url: "https://dlfdvvikcbymfnixdoeh.supabase.co", key: "sb_publishable_eJU54Kv2QJo9t__5WgajFw_FOh5RT-r" };
 const MOIS = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"];
 const PRODUITS = ["Agglomérés", "Q1", "Q2", "Q3", "Q4"];
+// Matières premières (bouchons naturels) transformées par les trieuses en semi-finis Q1–Q4
+const MATIERES = ["Espagne A", "Espagne B", "Espagne C", "Portugal A", "Portugal B", "Portugal C", "Maroc A", "Maroc B", "Maroc C"].map((x) => "Bouchons " + x);
+const TOUS = [...PRODUITS, ...MATIERES];
+const QS = ["Q1", "Q2", "Q3", "Q4"];
+const PRIX_MATIERES = { "Bouchons Espagne A": 55, "Bouchons Espagne B": 60, "Bouchons Espagne C": 65 };
+const DEFAULT_PRODUCTION = {
+  frais: 2,
+  prixMarche: { ...PRIX_MATIERES },
+  rendements: {
+    "Bouchons Espagne A": [15, 30, 30, 25], "Bouchons Espagne B": [20, 30, 30, 20], "Bouchons Espagne C": [25, 30, 25, 20],
+    "Bouchons Portugal A": [10, 25, 35, 30], "Bouchons Portugal B": [15, 30, 30, 25], "Bouchons Portugal C": [20, 35, 25, 20],
+    "Bouchons Maroc A": [5, 20, 35, 40], "Bouchons Maroc B": [10, 15, 30, 45], "Bouchons Maroc C": [15, 25, 35, 25],
+  },
+};
+// Ciblage marketing par segment (à partir du mois 3) : niveau → coût HT
+const CIBLAGES = [["Aucune", 0], ["Flyers (10 000 €)", 10000], ["E-mailing (20 000 €)", 20000], ["Visite de l'usine (50 000 €)", 50000]];
+const coutCiblage = (m) => SEGMENTS.reduce((t, sg) => t + (CIBLAGES[n0(m.marketing?.[sg]?.ciblage)]?.[1] || 0), 0);
+const PARAM_CHANGEABLES = [["Salaires mensuels (€)", "salaires"], ["Frais de structure mensuels (€)", "structure"], ["Frais de stockage (%)", "stockageRate"]];
+const RULES_MARS = `
+Annonce du mois de mars (mois 3) :
+- STECKER (fournisseur historique allemand) est en liquidation judiciaire : plus aucune offre de sa part. Il faut intensifier les démarches avec les fournisseurs français.
+- Rachat de ses machines de production (trieuses) pour 30 000 € (paiement comptant, amorti sur 5 ans) : nouveau domaine d'activité, le bouchon naturel.
+- Rachat de son stock de bouchons naturels pour 285 000 €, payé au mois de mars.
+- Salaires mensuels portés à 150 000 € dès maintenant (équipe pour le tri et la distribution). Les autres paramètres restent inchangés.
+- Trieuses : chaque lot de matière (Bouchons Espagne/Portugal/Maroc A/B/C) donne des bouchons semi-finis Q1 à Q4 selon des pourcentages ; frais de fabrication 2 € par unité en entrée.
+- Ciblage marketing : à partir du mois 3, une action marketing ciblée par typologie de client final (viticulteurs, négociants, caves), au choix parmi trois niveaux : Flyers (10 000 € HT), E-mailing (20 000 € HT), Visite de l'usine (50 000 € HT). Ce type de communication a un impact positif.
+- Prix d'achat moyen auprès des industriels : 55 €/lot Bouchons Espagne A, 60 €/lot Espagne B, 65 €/lot Espagne C.`;
 const SEGMENTS = ["Vignerons", "Caves", "Négociants"];
 const SEG_LABEL = { Vignerons: "Vignerons", Caves: "Caves", "Négociants": "Négociants / Grands comptes" };
 const DELAIS = ["Comptant", "30 jours", "60 jours"];
@@ -69,9 +96,9 @@ ${RULES_DISTRIB}`;
 
 const uid = () => Math.random().toString(36).slice(2, 9);
 const n0 = (v) => (Number.isFinite(+v) ? +v : 0);
-const emptyMarketing = () => ({ Vignerons: { prix: 0, delai: 0 }, Caves: { prix: 0, delai: 0 }, "Négociants": { prix: 0, delai: 0 }, pub: 0 });
+const emptyMarketing = () => ({ Vignerons: { prix: 0, delai: 0, ciblage: 0 }, Caves: { prix: 0, delai: 0, ciblage: 0 }, "Négociants": { prix: 0, delai: 0, ciblage: 0 }, pub: 0 });
 const emptyLivraisons = () => Object.fromEntries(SEGMENTS.map((s) => [s, { demande: 0, livre: 0 }]));
-const emptyMonth = (nom) => ({ nom, marketing: emptyMarketing(), livraisons: emptyLivraisons(), achats: [], ventes: [], depenses: [], planif: "", nego: "" });
+const emptyMonth = (nom) => ({ nom, marketing: emptyMarketing(), livraisons: emptyLivraisons(), achats: [], ventes: [], depenses: [], production: [], planif: "", nego: "" });
 
 function defaultState() {
   return {
@@ -82,6 +109,9 @@ function defaultState() {
     stockInitial: { lots: 12000, prix: 25, moisPaiement: 0, produit: "Agglomérés" },
     prixClients: structuredClone(DEFAULT_PRIX_CLIENTS),
     months: MOIS.map(emptyMonth),
+    paramChanges: [],      // [{ id, mois, cle, valeur }] : un paramètre change à partir d'un mois
+    investissements: [],   // [{ id, libelle, montant, mois, duree (années) }] : payé comptant, amorti
+    production: structuredClone(DEFAULT_PRODUCTION),
     rules: DEFAULT_RULES,
     chat: [],
   };
@@ -135,7 +165,9 @@ function load() {
 }
 function normProduit(p) {
   if (!p) return "Agglomérés";
-  if (PRODUITS.includes(p)) return p;
+  if (TOUS.includes(p)) return p;
+  const mt = String(p).match(/(espagne|portugal|maroc)\s*([abc])\b/i);
+  if (mt) return `Bouchons ${mt[1][0].toUpperCase()}${mt[1].slice(1).toLowerCase()} ${mt[2].toUpperCase()}`;
   if (/aggl/i.test(p)) return "Agglomérés";
   const q = String(p).match(/Q[1-4]/i);
   return q ? q[0].toUpperCase() : "Agglomérés";
@@ -157,6 +189,11 @@ function migrate(s) {
     ventes: (m.ventes || []).map((v) => ({ segment: SEGMENTS.includes(v.segment) ? v.segment : "Vignerons", ...v, produit: normProduit(v.produit), delai: Math.min(2, n0(v.delai)) })),
   }));
   out.months.forEach((m) => SEGMENTS.forEach((sg) => { m.marketing[sg].delai = Math.min(2, n0(m.marketing[sg].delai)); }));
+  out.months.forEach((m) => { m.production = (m.production || []).map((x) => ({ ...x, matiere: normProduit(x.matiere) })); });
+  out.paramChanges = Array.isArray(s.paramChanges) ? s.paramChanges : [];
+  out.investissements = Array.isArray(s.investissements) ? s.investissements : [];
+  out.production = { frais: s.production?.frais ?? DEFAULT_PRODUCTION.frais, prixMarche: { ...DEFAULT_PRODUCTION.prixMarche, ...(s.production?.prixMarche || {}) }, rendements: { ...structuredClone(DEFAULT_PRODUCTION.rendements), ...(s.production?.rendements || {}) } };
+  if (out.rules && !out.rules.includes("liquidation judiciaire")) out.rules += "\n" + RULES_MARS;
   if (out.rules && !out.rules.includes("Positionnement Marketing")) out.rules += "\n" + RULES_PLANIF;
   if (out.rules && !out.rules.includes("rôle de distributeur")) out.rules += "\n" + RULES_DISTRIB;
   out.rules = out.rules.replace("(« À la commande » ou plus)", "(comptant, 30 jours ou 60 jours)");
@@ -208,6 +245,14 @@ function ventesDuMois(m) {
   })).filter((v) => v.lots > 0);
   return [...seg, ...m.ventes];
 }
+// Valeur d'un paramètre au mois i (en tenant compte des changements en cours de jeu)
+function paramAt(s, i, k) {
+  let v = n0(s.params[k]);
+  (s.paramChanges || []).filter((c) => c.cle === k && n0(c.mois) <= i).sort((a, b) => n0(a.mois) - n0(b.mois)).forEach((c) => { v = n0(c.valeur); });
+  return v;
+}
+// Prix moyen marché d'achat d'un produit (agglomérés : paramètre ; matières : annonce du jeu)
+const prixMarcheDe = (prod) => (prod === "Agglomérés" ? n0(state.params.prixMarche) : n0(state.production?.prixMarche?.[prod]));
 const achatsValides = (m) => m.achats.filter((a) => (a.statut || "validee") === "validee");
 
 function compute(s) {
@@ -220,14 +265,14 @@ function compute(s) {
   const si = s.stockInitial;
   decAch[n0(si.moisPaiement)] += n0(si.lots) * n0(si.prix);
 
-  const stock = Object.fromEntries(PRODUITS.map((pr) => [pr, { lots: 0, val: 0 }]));
+  const stock = Object.fromEntries(TOUS.map((pr) => [pr, { lots: 0, val: 0 }]));
   stock[si.produit] = { lots: n0(si.lots), val: n0(si.lots) * n0(si.prix) };
   let treso = n0(p.capital);
   let cumRes = 0;
   const rows = [];
   for (let i = 0; i < n; i++) {
     const m = s.months[i];
-    const lotsDebut = PRODUITS.reduce((t, pr) => t + stock[pr].lots, 0);
+    const lotsDebut = TOUS.reduce((t, pr) => t + stock[pr].lots, 0);
     let cmdLots = 0, cmdVal = 0, transport = 0;
     const rse = {};
     for (const a of achatsValides(m)) {
@@ -244,9 +289,29 @@ function compute(s) {
     for (const [prod, a] of Object.entries(arrivals[i])) {
       stock[prod].lots += a.lots; stock[prod].val += a.val; recLots += a.lots; recVal += a.val;
     }
+    // production (trieuses) : matière → semi-finis Q1–Q4, coût = coût moyen de la matière + frais de fabrication
+    let prodLots = 0, fabrication = 0, prodNeg = false;
+    const prodOut = { Q1: 0, Q2: 0, Q3: 0, Q4: 0 };
+    const pp = s.production || DEFAULT_PRODUCTION;
+    for (const pl of m.production || []) {
+      const mat = normProduit(pl.matiere);
+      if (!MATIERES.includes(mat)) continue;
+      const l = Math.max(0, n0(pl.lots));
+      if (!l) continue;
+      const st = stock[mat];
+      if (l > st.lots + 1e-6) prodNeg = true;
+      const take = Math.min(l, st.lots);
+      const cu = st.lots > 0 ? st.val / st.lots : 0;
+      st.val -= take * cu; st.lots -= take;
+      const fr = n0(pp.frais);
+      fabrication += take * fr; prodLots += take;
+      const rd = pp.rendements?.[mat] || [25, 25, 25, 25];
+      const tot = rd.reduce((a, b) => a + n0(b), 0) || 100;
+      QS.forEach((q, k) => { const o = take * n0(rd[k]) / tot; stock[q].lots += o; stock[q].val += o * (cu + fr); prodOut[q] += o; });
+    }
     const cmupP = {};
     const dispoP = {};
-    for (const pr of PRODUITS) { dispoP[pr] = stock[pr].lots; cmupP[pr] = stock[pr].lots > 0 ? stock[pr].val / stock[pr].lots : 0; }
+    for (const pr of TOUS) { dispoP[pr] = stock[pr].lots; cmupP[pr] = stock[pr].lots > 0 ? stock[pr].val / stock[pr].lots : 0; }
     let venLots = 0, ca = 0, coutVentes = 0, transportVentes = 0;
     const venteP = {};
     for (const v of ventesDuMois(m)) {
@@ -260,7 +325,7 @@ function compute(s) {
     let lotsFin = 0, valFin = 0;
     const finP = {};
     let stockNeg = false;
-    for (const pr of PRODUITS) {
+    for (const pr of TOUS) {
       const lf = stock[pr].lots - (venteP[pr] || 0);
       if (lf < 0) stockNeg = true;
       // Un stock négatif (sur-vente) n'est pas reporté : le jeu ne permet pas de livrer plus que le stock
@@ -271,18 +336,29 @@ function compute(s) {
     const perdue = SEGMENTS.reduce((t, sg) => t + Math.max(0, n0(m.livraisons?.[sg]?.demande) - n0(m.livraisons?.[sg]?.livre)), 0);
     let transit = 0;
     for (let k = i + 1; k < H; k++) for (const a of Object.values(arrivals[k])) transit += a.lots;
-    const stockage = valFin * n0(p.stockageRate) / 100;
-    const pub = n0(m.marketing?.pub);
+    const stockageRate = paramAt(s, i, "stockageRate");
+    const stockage = valFin * stockageRate / 100;
+    const ciblage = coutCiblage(m);
+    const pub = n0(m.marketing?.pub) + n0(m.marketing?.pubNat) + ciblage; // publicité agglomérés + bouchons naturels + niveaux de publicité ciblés
     const divers = m.depenses.reduce((t, d) => t + n0(d.montant), 0) + pub;
-    const fixes = n0(p.salaires) + n0(p.structure);
-    const decaiss = fixes + stockage + transport + divers + decAch[i];
+    const salaires = paramAt(s, i, "salaires"), structure = paramAt(s, i, "structure");
+    const fixes = salaires + structure;
+    // investissements : payés comptant au mois d'achat, amortis (charge sans sortie d'argent) sur la durée
+    let investDec = 0, dotations = 0;
+    for (const inv of s.investissements || []) {
+      const mo = n0(inv.mois), mt = n0(inv.montant), dur = Math.max(1, Math.round(n0(inv.duree) * 12) || 60);
+      if (mo === i) investDec += mt;
+      if (i >= mo && i < mo + dur) dotations += mt / dur;
+    }
+    const decaiss = fixes + stockage + transport + divers + decAch[i] + fabrication + investDec;
     const tresoDebut = treso;
     const tresoFin = treso + enc[i] - decaiss;
-    const resultat = ca - coutVentes - fixes - stockage - transport - divers;
+    const resultat = ca - coutVentes - fixes - stockage - transport - divers - dotations;
     cumRes += resultat;
     rows.push({
       i, nom: m.nom, tresoDebut, encaissements: enc[i], paiementsAchats: decAch[i], fixes, stockage, transport, divers, pub,
       decaissements: decaiss, tresoFin, cmdLots, cmdVal, recLots, recVal, venLots, ca, coutVentes, lotsDebut, lotsFin, valFin, transit,
+      salaires, structure, stockageRate, dotations, ciblage, investDec, fabrication, prodLots, prodOut, prodNeg,
       demande, perdue, transportVentes, cmup: cmupP["Agglomérés"], cmupP, dispoP, finP, venteP, resultat, cumRes, marge: ca - coutVentes, rse, stockNeg,
     });
     treso = tresoFin;
@@ -328,7 +404,7 @@ const cls = (v) => (v < 0 ? "neg" : "");
 
 // Prix de vente minimum pour couvrir le coût d'achat + toutes les charges du mois
 function seuilRentable(r) {
-  const charges = r.fixes + r.stockage + r.transport + r.divers; // divers inclut pub et autres dépenses
+  const charges = r.fixes + r.stockage + r.transport + r.divers + r.dotations; // divers inclut pub et autres dépenses
   const cm = r.cmupP["Agglomérés"];
   let vol = r.venLots, base = "lots vendus ce mois";
   if (!vol) { vol = r.demande; base = "demande saisie"; }
@@ -408,8 +484,33 @@ function estimMois(c, i) {
   });
   const dispo = r.dispoP["Agglomérés"];
   const lots = Math.min(dem, dispo), ca = dem ? caPot * lots / dem : 0;
-  const charges = r.fixes + r.stockage + r.transport + r.divers;
+  const charges = r.fixes + r.stockage + r.transport + r.divers + r.dotations;
   return { demande: Math.round(dem), lots: Math.round(lots), ca: Math.round(ca), resultat: Math.round(ca - lots * cm - charges), inconnu };
+}
+
+function productionHtml(c, i) {
+  const m = state.months[i], r = c.rows[i];
+  const pp = state.production;
+  const dispoMat = MATIERES.filter((x) => (c.rows[i].dispoP[x] || 0) > 0 || (m.production || []).some((p) => p.matiere === x));
+  if (!dispoMat.length && !(m.production || []).length && i < 2) return "";
+  // stock de matière avant production ce mois (stock dispo + ce qui est trié)
+  const avant = {};
+  MATIERES.forEach((x) => { avant[x] = (r.dispoP[x] || 0) + (m.production || []).filter((p) => p.matiere === x).reduce((t, p) => t + n0(p.lots), 0); });
+  const inp = (j, k, v, extra = "") => `<input type="number" ${extra} data-m="${i}" data-list="production" data-j="${j}" data-k="${k}" value="${esc(v)}">`;
+  return `<div class="card">
+    <div class="row between"><h2>Production · trieuses (bouchons naturels)</h2><button class="btn ghost" data-add="production">+ Trier un lot de matière</button></div>
+    <p class="muted small">Chaque lot de matière trié donne des semi-finis Q1 à Q4 selon les pourcentages du jeu (Paramètres). Coût d'un lot produit = coût moyen de la matière + ${fmtP(n0(pp.frais))} de frais de fabrication (payés ce mois-ci). Hypothèse : les semi-finis sont vendables le mois même.</p>
+    <p class="small">Matières en stock ce mois : ${MATIERES.filter((x) => avant[x] > 0).map((x) => `<b>${fmtN(avant[x])}</b> ${esc(x.replace("Bouchons ", ""))}`).join(" · ") || `<span class="muted">aucune — saisissez le stock racheté (285 000 €) comme achat de matières à l'étape B de Mars</span>`}</p>
+    ${(m.production || []).length ? `<div class="table-wrap"><table>
+      <thead><tr><th>Matière</th><th class="r">Lots triés</th>${QS.map((q) => `<th class="r">→ ${q}</th>`).join("")}<th class="r">Frais</th><th></th></tr></thead>
+      <tbody>${m.production.map((p, j) => { const rd = pp.rendements[p.matiere] || [25, 25, 25, 25]; const tot = rd.reduce((a, b) => a + n0(b), 0) || 100; const l = n0(p.lots);
+        return `<tr><td><select data-m="${i}" data-list="production" data-j="${j}" data-k="matiere">${opts(MATIERES.map((x) => [x, x]), p.matiere)}</select></td>
+        <td class="r">${inp(j, "lots", p.lots)}${l > avant[p.matiere] + 1e-6 ? ` <span class="badge crit">&gt; stock</span>` : ""}</td>
+        ${QS.map((q, k) => `<td class="r">${fmtN(l * n0(rd[k]) / tot)} <span class="muted small">${n0(rd[k])} %</span></td>`).join("")}
+        <td class="r">${fmtE(l * n0(pp.frais))}</td><td><button class="btn danger" data-del="production" data-j="${j}">✕</button></td></tr>`; }).join("")}</tbody>
+    </table></div>
+    <p class="small">Produit ce mois : ${QS.map((q) => `<b>${fmtN(r.prodOut[q])}</b> ${q}${r.prodOut[q] ? ` (coût ${fmtP(r.cmupP[q])})` : ""}`).join(" · ")}. Vendez-les dans « Autres ventes » (produit Q1 à Q4, fourchettes de prix dans Paramètres).</p>` : ""}
+  </div>`;
 }
 
 function planifAideHtml(c, i) {
@@ -475,7 +576,7 @@ function negoHtml(c, s, mi) {
   });
   const P = den ? num / den : n0(state.params.prixMarche) * 1.5;
   const vol = demandeAttendue(state.currentMonth) || n0(s.lots) || 1;
-  const charges = cur.fixes + cur.stockage + (cur.divers);
+  const charges = cur.fixes + cur.stockage + cur.divers + cur.dotations;
   const H = charges / vol;
   const pMaxMarge = P * (1 - tm / 100) - H, pMaxEq = P - H;
   const simMin = (lots, delai) => {
@@ -576,7 +677,7 @@ function revientMois(c, i, cle = "ca") {
     return { produit: prod, segment: SEGMENTS.includes(v.segment) ? v.segment : "Autre", lots, ca: lots * n0(v.prix), prod: lots * (r.cmupP[prod] || 0), direct: n0(v.coutTransport) };
   }).filter((l) => l.lots > 0);
   const ind = {
-    "Salaires": n0(state.params.salaires), "Frais de structure": n0(state.params.structure), "Frais de stockage": r.stockage,
+    "Salaires": r.salaires, "Frais de structure": r.structure, "Frais de stockage": r.stockage, "Dotations aux amortissements": r.dotations,
     "Publicité / marketing": r.pub, "Transport des achats": r.transport - r.transportVentes, "Autres dépenses": r.divers - r.pub,
   };
   const totInd = Object.values(ind).reduce((a, b) => a + b, 0);
@@ -667,7 +768,6 @@ function renderRevient(c) {
         <table><thead><tr><th>Charge</th><th>Type</th><th class="r">Montant</th></tr></thead><tbody>
           ${Object.entries(R.ind).map(([k, v]) => `<tr><td>${k}</td><td><span class="badge warn">indirecte</span></td><td class="r">${fmtE(v)}</td></tr>`).join("")}
           <tr><td>Transport des ventes</td><td><span class="badge good">directe</span></td><td class="r">${fmtE(g.direct)}</td></tr>
-          <tr><td>Dotations aux amortissements</td><td class="muted small" colspan="2">à saisir dans « autres dépenses » si le jeu en compte</td></tr>
           <tr><td><b>Total</b></td><td></td><td class="r"><b>${fmtE(R.totInd + g.direct)}</b></td></tr>
         </tbody></table>
         <p class="muted small">Indirectes : réparties au prorata ${R.useCA ? "du chiffre d'affaires" : "des lots vendus"} de chaque produit / marché. Directes : affectées à la vente concernée.</p>
@@ -931,6 +1031,7 @@ function alertsFor(c) {
   c.rows.forEach((r) => {
     if (r.tresoFin < 0) out.push({ cls: "crit", t: `<b>${r.nom}</b> : trésorerie négative prévue (${fmtE(r.tresoFin)}).` });
     else if (r.tresoFin < n0(p.seuilTreso)) out.push({ cls: "warn", t: `<b>${r.nom}</b> : trésorerie sous le seuil de sécurité (${fmtE(r.tresoFin)} < ${fmtE(n0(p.seuilTreso))}).` });
+    if (r.prodNeg) out.push({ cls: "crit", t: `<b>${r.nom}</b> : production supérieure au stock de matière disponible (seule la quantité en stock est triée).` });
     if (r.stockNeg) {
       const pr = PRODUITS.filter((x) => r.finP[x] < 0).join(", ");
       out.push({ cls: "crit", t: `<b>${r.nom}</b> : ventes supérieures au stock disponible (${esc(pr)}). Rappel : un achat chez un industriel n'arrive que 30 jours plus tard.` });
@@ -970,7 +1071,7 @@ function renderDashboard(c) {
           <tr><td>Encaissements clients attendus (après ${esc(cur.nom)})</td><td class="r">${fmtE(c.aEncaisser)}</td></tr>
           <tr><td>Paiements fournisseurs à venir (après ${esc(cur.nom)})</td><td class="r">${fmtE(c.aPayer)}</td></tr>
           <tr><td>Lots commandés pas encore livrés</td><td class="r">${fmtN(cur.transit)}</td></tr>
-          <tr><td>Charges fixes mensuelles</td><td class="r">${fmtE(n0(state.params.salaires) + n0(state.params.structure))}</td></tr>
+          <tr><td>Charges fixes mensuelles</td><td class="r">${fmtE(cur.fixes)}</td></tr>
           <tr><td>Impact RSE transports</td><td class="r"><span class="badge ${rse.cls === "info" ? "warn" : rse.cls}">${esc(rse.label)}</span></td></tr>
         </tbody></table>
       </div>
@@ -1088,12 +1189,18 @@ function renderMois(c) {
               ${marge !== null ? ` · marge <b class="${cls(marge)}">${fmtP(marge)}</b>/lot` : ""}
               ${n0(mk.prix) && Number.isFinite(seuilRentable(r).prix) ? (clampPrix(s, "Agglomérés", mk.prix) >= seuilRentable(r).prix ? ` · <span class="badge good">rentable</span>` : ` · <span class="badge warn">sous le seuil (${fmtP(seuilRentable(r).prix)})</span>`) : ""}</div>
             <label class="field">Délai de paiement<select data-mk="${s}" data-mkk="delai" data-m="${i}">${opts(delaiList, mk.delai)}</select></label>
+            <details class="qprix" ${QS.some((q) => n0(mk["prix" + q])) ? "open" : ""}><summary class="small">Prix bouchons naturels Q1–Q4${QS.some((q) => n0(mk["prix" + q])) ? "" : " (non saisis)"}</summary>
+              <div class="q-grid">${QS.map((q) => { const rq = range(s, q); return `<label class="field">${q} <span class="muted small">${rq ? `${rq[0]}–${rq[1]}` : ""}</span><input type="number" step="0.5" class="sm" data-mk="${s}" data-mkk="prix${q}" data-m="${i}" value="${esc(mk["prix" + q] || 0)}"></label>`; }).join("")}</div>
+            </details>
+            <label class="field" style="margin-top:8px">Niveau de publicité (ciblage)${i < 2 ? ` <span class="muted small">(à partir de Mars)</span>` : ""}<select data-mk="${s}" data-mkk="ciblage" data-m="${i}">${opts(CIBLAGES.map(([l], k) => [l, k]), n0(mk.ciblage))}</select></label>
           </div>`;
         }).join("")}
         <div class="seg">
           <h3>Publicité produits</h3>
-          <label class="field">Publicité Agglomérés (€)<input type="number" step="100" data-mk="pub" data-m="${i}" value="${esc(m.marketing.pub)}"></label>
+          <label class="field">Publicité Bouchons Naturels (€)<input type="number" step="100" data-mk="pubNat" data-m="${i}" value="${esc(m.marketing.pubNat || 0)}"></label>
+          <label class="field" style="margin-top:8px">Publicité Agglomérés (€)<input type="number" step="100" data-mk="pub" data-m="${i}" value="${esc(m.marketing.pub)}"></label>
           <p class="muted small">Stimule la demande <b>de ce mois uniquement</b>. Décaissée ce mois-ci. Inutile si le stock est faible.</p>
+          ${r.ciblage ? `<p class="small">Niveaux de publicité ciblés ce mois-ci : <b>${fmtE(r.ciblage)}</b> (comptés avec la publicité).</p>` : ""}
         </div>
       </div>
       <p class="muted small">Coût moyen des agglomérés ce mois-ci : <b>${fmtP(cmA)}</b>/lot${c.rows[i + 1] && Math.abs(c.rows[i + 1].cmupP["Agglomérés"] - cmA) > 0.005 && c.rows[i + 1].dispoP["Agglomérés"] > 0 ? ` → <b>${fmtP(c.rows[i + 1].cmupP["Agglomérés"])}</b> en ${esc(c.rows[i + 1].nom)} après réception des achats` : ""}. Les prix et délais fixés ici servent de valeurs par défaut pour les ventes du mois.</p>
@@ -1138,9 +1245,9 @@ function renderMois(c) {
         <tbody>${m.achats.length ? m.achats.map((a, j) => `<tr class="${(a.statut || "validee") === "validee" ? "" : "inactive"}">
           <td>${sel("achats", j, "statut", STATUTS, a.statut || "validee")}</td>
           <td>${inp("achats", j, "fournisseur", a.fournisseur, "text")}</td>
-          <td>${sel("achats", j, "produit", prodList, a.produit)}</td>
+          <td>${sel("achats", j, "produit", TOUS.map((x) => [x, x]), a.produit)}</td>
           <td class="r">${inp("achats", j, "lots", a.lots)}</td>
-          <td class="r">${inp("achats", j, "prix", a.prix, "number", 'step="0.01" class="sm"')} ${a.produit === "Agglomérés" && n0(a.prix) > n0(state.params.prixMarche) ? `<span class="badge warn" title="Au-dessus du prix marché">↑ marché</span>` : ""}</td>
+          <td class="r">${inp("achats", j, "prix", a.prix, "number", 'step="0.01" class="sm"')} ${(() => { const pm = prixMarcheDe(a.produit); return pm && n0(a.prix) > pm ? `<span class="badge warn" title="Au-dessus du prix moyen marché (${fmtP(pm)})">↑ marché</span>` : ""; })()}</td>
           <td>${sel("achats", j, "livraison", LIVRAISONS, a.livraison)}</td>
           <td>${sel("achats", j, "delai", delaiList, a.delai)}</td>
           <td>${transportSelect(`data-m="${i}" data-list="achats" data-j="${j}" data-k="transport"`, a.transport)}</td>
@@ -1149,6 +1256,8 @@ function renderMois(c) {
           <td><button class="btn danger" data-del="achats" data-j="${j}" title="Supprimer">✕</button></td></tr>`).join("") : `<tr><td colspan="11" class="muted">Aucun achat ce mois-ci.</td></tr>`}</tbody>
       </table></div>
     </div>
+
+    ${productionHtml(c, i)}
 
     <div class="card">
       <div class="row between"><h2>Autres ventes</h2><button class="btn ghost" data-add="ventes">+ Ajouter une vente</button></div>
@@ -1183,11 +1292,14 @@ function renderMois(c) {
           <td><button class="btn danger" data-del="depenses" data-j="${j}">✕</button></td></tr>`).join("") : `<tr><td class="muted">Aucune.</td></tr>`}</tbody></table>
         <h3 class="section-gap">Charges automatiques du mois</h3>
         <table><tbody>
-          <tr><td>Salaires</td><td class="r">${fmtE(n0(state.params.salaires))}</td></tr>
-          <tr><td>Frais de structure</td><td class="r">${fmtE(n0(state.params.structure))}</td></tr>
-          <tr><td>Publicité</td><td class="r">${fmtE(r.pub)}</td></tr>
-          <tr><td>Stockage (${state.params.stockageRate} % de ${fmtE(r.valFin)})</td><td class="r">${fmtE(r.stockage)}</td></tr>
+          <tr><td>Salaires</td><td class="r">${fmtE(r.salaires)}</td></tr>
+          <tr><td>Frais de structure</td><td class="r">${fmtE(r.structure)}</td></tr>
+          <tr><td>Publicité + ciblage marketing</td><td class="r">${fmtE(r.pub)}</td></tr>
+          <tr><td>Stockage (${r.stockageRate} % de ${fmtE(r.valFin)})</td><td class="r">${fmtE(r.stockage)}</td></tr>
           <tr><td>Paiements fournisseurs exigibles</td><td class="r">${fmtE(r.paiementsAchats)}</td></tr>
+          ${r.fabrication ? `<tr><td>Frais de fabrication (trieuses)</td><td class="r">${fmtE(r.fabrication)}</td></tr>` : ""}
+          ${r.investDec ? `<tr><td>Investissements payés</td><td class="r">${fmtE(r.investDec)}</td></tr>` : ""}
+          ${r.dotations ? `<tr><td>Dotations aux amortissements <span class="muted small">(charge sans sortie d'argent)</span></td><td class="r">${fmtE(r.dotations)}</td></tr>` : ""}
         </tbody></table>
       </div>
       <div class="card">
@@ -1213,17 +1325,17 @@ function renderStock(c) {
       <div class="card kpi"><div class="label">Stock fin ${esc(cur.nom)}</div><div class="value">${fmtN(cur.lotsFin)} lots</div><div class="hint">+ ${fmtN(cur.transit)} en transit</div></div>
       <div class="card kpi"><div class="label">Coût moyen agglomérés</div><div class="value">${fmtP(cur.cmup)}</div><div class="hint">${(() => { const nx = c.rows[state.currentMonth + 1]; return nx && nx.dispoP["Agglomérés"] > 0 && Math.abs(nx.cmupP["Agglomérés"] - cur.cmup) > 0.005 ? `→ ${fmtP(nx.cmupP["Agglomérés"])} en ${esc(nx.nom)} après réception · ` : ""; })()}marché ≈ ${fmtP(n0(state.params.prixMarche))}<br>Vente rentable dès <b>${fmtP(seuilRentable(cur).prix)}</b>/lot</div></div>
       <div class="card kpi"><div class="label">Couverture</div><div class="value">${Number.isFinite(couverture) ? couverture.toLocaleString("fr-FR", { maximumFractionDigits: 1 }) + " mois" : "—"}</div><div class="hint">au rythme moyen de ${fmtN(avgVentes)} lots/mois vendus</div></div>
-      <div class="card kpi"><div class="label">Coût de stockage du mois</div><div class="value">${fmtE(cur.stockage)}</div><div class="hint">${state.params.stockageRate} % de la valeur du stock</div></div>
+      <div class="card kpi"><div class="label">Coût de stockage du mois</div><div class="value">${fmtE(cur.stockage)}</div><div class="hint">${cur.stockageRate} % de la valeur du stock</div></div>
     </div>
     <div class="card section-gap">
       <h2>Prix de vente minimum rentable · ${esc(cur.nom)}</h2>
       <p class="seuil">${seuilHtml(cur, false)}</p>
-      <p class="muted small">C'est le prix moyen de vente par lot (agglomérés) en dessous duquel le mois est en perte : il couvre le coût d'achat des lots + salaires (${fmtE(n0(state.params.salaires))}) + structure (${fmtE(n0(state.params.structure))}) + stockage (${fmtE(cur.stockage)}) + publicité (${fmtE(cur.pub)}) + transport et autres (${fmtE(cur.transport + cur.divers - cur.pub)}). Plus vous vendez de lots, plus ce prix baisse.</p>
+      <p class="muted small">C'est le prix moyen de vente par lot (agglomérés) en dessous duquel le mois est en perte : il couvre le coût d'achat des lots + salaires (${fmtE(cur.salaires)}) + structure (${fmtE(cur.structure)}) + amortissements (${fmtE(cur.dotations)}) + stockage (${fmtE(cur.stockage)}) + publicité (${fmtE(cur.pub)}) + transport et autres (${fmtE(cur.transport + cur.divers - cur.pub)}). Plus vous vendez de lots, plus ce prix baisse.</p>
     </div>
     <div class="card">
       <h2>Stock par produit · fin ${esc(cur.nom)}</h2>
       <table><thead><tr><th>Produit</th><th class="r">Lots</th><th class="r">Coût moyen</th><th class="r">Valeur</th><th>Prix de vente possibles (Vignerons / Caves / Négociants)</th></tr></thead><tbody>
-        ${PRODUITS.map((p) => `<tr><td>${p}</td><td class="r ${cls(cur.finP[p])}">${fmtN(cur.finP[p])}</td><td class="r">${cur.finP[p] ? fmtP(cur.cmupP[p]) : "—"}</td><td class="r">${fmtE(Math.max(0, cur.finP[p]) * cur.cmupP[p])}</td>
+        ${[...PRODUITS, ...MATIERES.filter((x) => c.rows.some((rw) => rw.dispoP[x] > 0))].map((p) => `<tr><td>${p}</td><td class="r ${cls(cur.finP[p])}">${fmtN(cur.finP[p])}</td><td class="r">${cur.finP[p] ? fmtP(cur.cmupP[p]) : "—"}</td><td class="r">${fmtE(Math.max(0, cur.finP[p]) * cur.cmupP[p])}</td>
           <td class="small">${SEGMENTS.map((s) => { const rg = range(s, p); return rg ? `${rg[0]}–${rg[1]} €` : "—"; }).join(" / ")}</td></tr>`).join("")}
       </tbody></table>
     </div>
@@ -1280,7 +1392,7 @@ function renderSimu(c) {
       <div class="form-grid">
         <label class="field">Type<select data-simu="type">${opts([["Achat fournisseur", "achat"], ["Vente client", "vente"]], s.type)}</select></label>
         <label class="field">Mois<select data-simu="mois">${opts(state.months.map((m, k) => [m.nom, k]), mi)}</select></label>
-        <label class="field">Produit<select data-simu="produit">${opts(PRODUITS.map((p) => [p, p]), s.produit)}</select></label>
+        <label class="field">Produit<select data-simu="produit">${opts((s.type === "achat" ? TOUS : PRODUITS).map((p) => [p, p]), s.produit)}</select></label>
         ${s.type === "vente" ? `<label class="field">Segment<select data-simu="segment">${opts(SEGMENTS.map((g) => [SEG_LABEL[g], g]), s.segment)}</select></label>` : `<label class="field">Livraison<select data-simu="livraison">${opts(LIVRAISONS, s.livraison)}</select></label>`}
         <label class="field">Lots<input type="number" data-simu="lots" value="${s.lots}"></label>
         <label class="field">Prix par lot (€)<input type="number" step="0.01" data-simu="prix" value="${s.prix}"></label>
@@ -1319,7 +1431,7 @@ function adviceRules(c) {
   const out = [];
   const cur = c.rows[state.currentMonth];
   const m = state.months[state.currentMonth];
-  const fixes = n0(p.salaires) + n0(p.structure);
+  const fixes = cur.fixes;
   const cmA = cur.cmupP["Agglomérés"] || n0(state.stockInitial.prix);
   if (c.minTreso < 0) out.push({ cls: "crit", t: `Trésorerie négative prévue en <b>${esc(c.rows[c.minTresoMonth].nom)}</b> (${fmtE(c.minTreso)}). Leviers : négocier des paiements fournisseurs à 30/60 jours, encaisser les clients comptant, réduire les achats ou vendre du stock.` });
   else out.push({ cls: "good", t: `Trésorerie positive sur tout l'horizon (minimum ${fmtE(c.minTreso)} en ${esc(c.rows[c.minTresoMonth].nom)}).` });
@@ -1375,23 +1487,27 @@ function contextForAI(c) {
     mois: r.nom, tresoDebut: Math.round(r.tresoDebut), encaissements: Math.round(r.encaissements), paiementsFournisseurs: Math.round(r.paiementsAchats),
     chargesFixes: r.fixes, publicite: r.pub, stockage: Math.round(r.stockage), transportEtDivers: Math.round(r.transport + r.divers - r.pub), tresoFin: Math.round(r.tresoFin),
     demandeClients: r.demande, demandePerdue: r.perdue, lotsCommandes: r.cmdLots, lotsRecus: r.recLots, lotsVendus: r.venLots, stockFinParProduit: Object.fromEntries(PRODUITS.filter((p) => r.finP[p]).map((p) => [p, r.finP[p]])),
-    enTransit: r.transit, coutMoyenAgglo: +r.cmup.toFixed(2), CA: Math.round(r.ca), resultat: Math.round(r.resultat),
+    enTransit: r.transit, coutMoyenAgglo: +r.cmup.toFixed(2), salaires: r.salaires, dotationsAmortissements: Math.round(r.dotations), investissementsPayes: r.investDec, fraisFabrication: Math.round(r.fabrication), lotsTries: r.prodLots, produitQ: Object.fromEntries(QS.filter((q) => r.prodOut[q]).map((q) => [q, Math.round(r.prodOut[q])])), CA: Math.round(r.ca), resultat: Math.round(r.resultat),
     coutRevientParLot: r.venLots ? +((r.ca - r.resultat) / r.venLots).toFixed(2) : null,
   }));
   const details = state.months.map((m) => ({
     mois: m.nom,
-    planification: SEGMENTS.some((s) => n0(m.marketing[s].prix)) || n0(m.marketing.pub) ? {
-      ...Object.fromEntries(SEGMENTS.map((s) => [s, { prixAgglo: n0(m.marketing[s].prix), delaiPaiement: DELAIS[n0(m.marketing[s].delai)] }])), publicite: n0(m.marketing.pub),
+    production: (m.production || []).length ? m.production.map((x) => ({ matiere: x.matiere, lots: n0(x.lots) })) : undefined,
+    planification: SEGMENTS.some((s) => n0(m.marketing[s].prix) || n0(m.marketing[s].ciblage)) || n0(m.marketing.pub) || n0(m.marketing.pubNat) ? {
+      ...Object.fromEntries(SEGMENTS.map((s) => [s, { prixAgglo: n0(m.marketing[s].prix), ...Object.fromEntries(QS.filter((q) => n0(m.marketing[s]["prix" + q])).map((q) => ["prix" + q, n0(m.marketing[s]["prix" + q])])), delaiPaiement: DELAIS[n0(m.marketing[s].delai)], niveauPublicite: CIBLAGES[n0(m.marketing[s].ciblage)][0] }])), publiciteAgglomeres: n0(m.marketing.pub), publiciteBouchonsNaturels: n0(m.marketing.pubNat),
     } : undefined,
     livraisonsParSegment: SEGMENTS.some((sg) => n0(m.livraisons[sg].demande)) ? Object.fromEntries(SEGMENTS.map((sg) => [sg, { demande: n0(m.livraisons[sg].demande), livre: n0(m.livraisons[sg].livre), prixEffectif: clampPrix(sg, "Agglomérés", m.marketing[sg].prix) }])) : undefined,
     achats: m.achats.map((a) => ({ statut: STATUTS.find((x) => x[1] === (a.statut || "validee"))[0], fournisseur: a.fournisseur, produit: a.produit, lots: n0(a.lots), prix: n0(a.prix), livraison: LIVRAISONS.find((l) => l[1] === n0(a.livraison))?.[0], paiement: DELAIS[n0(a.delai)], transport: a.transport, coutTransport: n0(a.coutTransport) })),
     ventes: m.ventes.map((v) => ({ segment: v.segment, client: v.client, produit: v.produit, lots: n0(v.lots), prix: n0(v.prix), encaissement: DELAIS[n0(v.delai)], transport: v.transport || null })),
     autres: m.depenses.map((d) => ({ libelle: d.libelle, montant: n0(d.montant) })),
     notesPlanification: m.planif || undefined, notesNegociation: m.nego || undefined,
-  })).filter((m) => m.planification || m.livraisonsParSegment || m.achats.length || m.ventes.length || m.autres.length || m.notesPlanification || m.notesNegociation);
+  })).filter((m) => m.production || m.planification || m.livraisonsParSegment || m.achats.length || m.ventes.length || m.autres.length || m.notesPlanification || m.notesNegociation);
   return `<etat_entreprise mois_en_cours="${state.months[state.currentMonth].nom}">
 Paramètres : ${JSON.stringify(state.params)}
 Stock initial : ${JSON.stringify(state.stockInitial)}
+Changements de paramètres en cours de jeu (mois = index, 0 = Janvier) : ${JSON.stringify(state.paramChanges)}
+Investissements (payés comptant, amortis) : ${JSON.stringify(state.investissements)}
+Production (trieuses) : frais ${state.production.frais} €/lot en entrée ; rendements matière → [Q1,Q2,Q3,Q4] % : ${JSON.stringify(state.production.rendements)} ; prix moyen d'achat des matières : ${JSON.stringify(state.production.prixMarche)}
 Fourchettes de prix clients [min, max] €/lot : ${JSON.stringify(state.prixClients)}
 Projection mensuelle (calculée par l'outil ; mois futurs = prévision selon les saisies ; achats industriels reçus 30 jours après) :
 ${JSON.stringify(rows)}
@@ -1402,7 +1518,7 @@ RSE : ${JSON.stringify(rseSummary(state))}
 </etat_entreprise>`;
 }
 
-const SYSTEM_PROMPT = (rules) => `Tu es le conseiller stratégique d'une équipe d'étudiants dans un jeu d'entreprise (business game, plateforme Vinego). Ils dirigent un distributeur de bouchons de liège : ils achètent des lots à des industriels (dont STECKER, fournisseur allemand historique) ou à d'autres distributeurs, et les revendent à trois segments de clients : Vignerons, Caves, Négociants / Grands comptes. Chaque "mois" du jeu comporte une phase de planification (positionnement marketing : prix et délai de paiement par segment, budget publicité) puis une phase de négociation (négociations fournisseurs, ventes).
+const SYSTEM_PROMPT = (rules) => `Tu es le conseiller stratégique d'une équipe d'étudiants dans un jeu d'entreprise (business game, plateforme Vinego). Ils dirigent un distributeur de bouchons de liège : ils achètent des lots à des industriels (STECKER, fournisseur allemand historique, est en liquidation depuis mars : plus d'offres de sa part) ou à d'autres distributeurs, et les revendent à trois segments de clients : Vignerons, Caves, Négociants / Grands comptes. Chaque "mois" du jeu comporte une phase de planification (positionnement marketing : prix et délai de paiement par segment, budget publicité) puis une phase de négociation (négociations fournisseurs, ventes).
 
 Objectif de l'équipe : être la meilleure entreprise (résultat, ventes, RSE) sans jamais avoir une trésorerie négative.
 
@@ -1644,6 +1760,29 @@ function renderParams() {
       <div class="row"><span class="muted small">${state.months.length} mois.</span><button class="btn ghost" id="addMonth">+ Ajouter un mois</button><button class="btn ghost" id="delMonth" ${state.months.length <= 1 ? "disabled" : ""}>− Retirer le dernier mois</button></div>
     </div>
     <div class="card">
+      <h2>Changements en cours de jeu</h2>
+      <p class="muted small">Quand le jeu annonce un nouveau paramètre (ex. salaires à 150 000 € en mars), ajoutez-le ici : il s'applique <b>à partir du mois choisi</b>, les mois précédents gardent l'ancienne valeur.</p>
+      <div class="table-wrap"><table><thead><tr><th>À partir de</th><th>Paramètre</th><th class="r">Nouvelle valeur</th><th></th></tr></thead><tbody>
+        ${state.paramChanges.length ? state.paramChanges.map((x, j) => `<tr><td><select data-pchg="${j}|mois">${opts(state.months.map((m, k) => [m.nom, k]), x.mois)}</select></td><td><select data-pchg="${j}|cle">${opts(PARAM_CHANGEABLES, x.cle)}</select></td><td class="r"><input type="number" step="0.01" data-pchg="${j}|valeur" value="${esc(x.valeur)}"></td><td><button class="btn danger" data-delpchg="${j}">✕</button></td></tr>`).join("") : `<tr><td colspan="4" class="muted">Aucun changement.</td></tr>`}
+      </tbody></table></div>
+      <button class="btn ghost" id="addPchg">+ Ajouter un changement</button>
+
+      <h3 class="section-gap">Investissements (machines…)</h3>
+      <p class="muted small">Payés comptant au mois choisi (sortie de trésorerie), puis amortis : chaque mois, montant ÷ (durée × 12) est compté en charge (dotation aux amortissements) dans le résultat et le coût de revient, sans sortie d'argent.</p>
+      <div class="table-wrap"><table><thead><tr><th>Libellé</th><th class="r">Montant (€)</th><th>Payé en</th><th class="r">Durée (ans)</th><th class="r">Dotation / mois</th><th></th></tr></thead><tbody>
+        ${state.investissements.length ? state.investissements.map((x, j) => `<tr><td><input type="text" data-inv="${j}|libelle" value="${esc(x.libelle)}"></td><td class="r"><input type="number" data-inv="${j}|montant" value="${esc(x.montant)}"></td><td><select data-inv="${j}|mois">${opts(state.months.map((m, k) => [m.nom, k]), x.mois)}</select></td><td class="r"><input type="number" class="sm" step="0.5" data-inv="${j}|duree" value="${esc(x.duree)}"></td><td class="r">${fmtE(n0(x.montant) / Math.max(1, n0(x.duree) * 12))}</td><td><button class="btn danger" data-delinv="${j}">✕</button></td></tr>`).join("") : `<tr><td colspan="6" class="muted">Aucun investissement.</td></tr>`}
+      </tbody></table></div>
+      <button class="btn ghost" id="addInv">+ Ajouter un investissement</button>
+    </div>
+    <div class="card">
+      <h2>Production · trieuses</h2>
+      <div class="form-grid">${f("production.frais", "Frais de fabrication (€ par lot en entrée)", state.production.frais, "0.01")}</div>
+      <p class="muted small section-gap">Rendements (tableau « Trieuses » du jeu) : part de chaque lot de matière qui devient Q1, Q2, Q3, Q4. Prix moyen d'achat : annonce du jeu (laisser vide si inconnu).</p>
+      <div class="table-wrap"><table><thead><tr><th>Matière</th>${QS.map((q) => `<th class="r">${q} (%)</th>`).join("")}<th class="r">Prix d'achat moyen (€/lot)</th></tr></thead><tbody>
+        ${MATIERES.map((mt) => `<tr><td>${esc(mt)}</td>${QS.map((q, k) => `<td class="r"><input type="number" class="sm" data-rend="${mt}|${k}" value="${state.production.rendements[mt]?.[k] ?? 0}"></td>`).join("")}<td class="r"><input type="number" class="sm" step="0.01" data-pmat="${mt}" value="${state.production.prixMarche[mt] ?? ""}"></td></tr>`).join("")}
+      </tbody></table></div>
+    </div>
+    <div class="card">
       <h2>Fourchettes de prix clients (€/lot)</h2>
       <p class="muted small">Issues de « Informations Clients ». Modifiez-les si le jeu les change.</p>
       <div class="table-wrap"><table>
@@ -1701,18 +1840,21 @@ document.addEventListener("click", (e) => {
   if (t.dataset.editmonth !== undefined) { ui.editMonth = +t.dataset.editmonth; render(); return; }
   if (t.dataset.add) {
     const m = state.months[ui.editMonth];
-    if (t.dataset.add === "achats") m.achats.push({ id: uid(), fournisseur: "STECKER", produit: "Agglomérés", lots: 5000, prix: n0(state.params.prixMarche), livraison: 1, delai: 0, transport: "Train", coutTransport: 0 });
+    if (t.dataset.add === "achats") m.achats.push({ id: uid(), fournisseur: "", produit: "Agglomérés", lots: 5000, prix: n0(state.params.prixMarche), livraison: 1, delai: 0, transport: "Train", coutTransport: 0 });
     if (t.dataset.add === "ventes") {
       const seg = "Vignerons", rg = range(seg, "Agglomérés");
       const pr = n0(m.marketing[seg].prix) || (rg ? (rg[0] + rg[1]) / 2 : 0);
       m.ventes.push({ id: uid(), segment: seg, client: "", produit: "Agglomérés", lots: 1000, prix: pr, delai: n0(m.marketing[seg].delai), transport: "", coutTransport: 0 });
     }
     if (t.dataset.add === "depenses") m.depenses.push({ id: uid(), libelle: "", montant: 0 });
+    if (t.dataset.add === "production") { m.production = m.production || []; const r0 = compute(state).rows[ui.editMonth]; const mat = MATIERES.find((x) => r0.dispoP[x] > 0) || MATIERES[0]; m.production.push({ id: uid(), matiere: mat, lots: Math.round(r0.dispoP[mat] || 0) }); }
     save(); render(); return;
   }
   if (t.dataset.del) { state.months[ui.editMonth][t.dataset.del].splice(+t.dataset.j, 1); save(); render(); return; }
   if (t.dataset.q) { if (getKey() && !ui.busy) askAI(t.dataset.q); else copyForAI(t.dataset.q); return; }
   if (/^cloud/.test(t.id) || t.dataset.cloudrestore !== undefined) { cloudClick(t.id, t); return; }
+  if (t.dataset.delpchg !== undefined) { state.paramChanges.splice(+t.dataset.delpchg, 1); save(); render(); return; }
+  if (t.dataset.delinv !== undefined) { state.investissements.splice(+t.dataset.delinv, 1); save(); render(); return; }
   if (t.dataset.restore !== undefined) {
     const b = listBackups()[+t.dataset.restore];
     if (b && confirm(`Remplacer les valeurs actuelles par la sauvegarde du ${fmtDate(b.date)} ?\n(Les valeurs actuelles sont d'abord sauvegardées.)`)) {
@@ -1742,6 +1884,8 @@ document.addEventListener("click", (e) => {
     }
     case "forgetKey": lsSet(iaProvider() === "claude" ? KEY_KEY : GEM_KEY, ""); render(); break;
     case "sendChat": askAI(document.getElementById("chatInput").value); break;
+    case "addPchg": state.paramChanges.push({ id: uid(), mois: state.currentMonth, cle: "salaires", valeur: n0(state.params.salaires) }); save(); render(); break;
+    case "addInv": state.investissements.push({ id: uid(), libelle: "", montant: 0, mois: state.currentMonth, duree: 5 }); save(); render(); break;
     case "figerPrevu": {
       const i = +t.dataset.m, e = estimMois(compute(state), i);
       state.months[i].prevu = { date: new Date().toISOString(), demande: e.demande, lots: e.lots, ca: e.ca, resultat: e.resultat };
@@ -1810,6 +1954,10 @@ document.addEventListener("click", (e) => {
 
 document.addEventListener("change", (e) => {
   const t = e.target;
+  if (t.dataset.pchg) { const [j, k] = t.dataset.pchg.split("|"); state.paramChanges[+j][k] = k === "cle" ? t.value : n0(t.value); save(); render(); return; }
+  if (t.dataset.inv) { const [j, k] = t.dataset.inv.split("|"); state.investissements[+j][k] = k === "libelle" ? t.value : n0(t.value); save(); render(); return; }
+  if (t.dataset.rend) { const [mt, k] = t.dataset.rend.split("|"); state.production.rendements[mt] = state.production.rendements[mt] || [0, 0, 0, 0]; state.production.rendements[mt][+k] = n0(t.value); save(); render(); return; }
+  if (t.dataset.pmat) { if (t.value === "") delete state.production.prixMarche[t.dataset.pmat]; else state.production.prixMarche[t.dataset.pmat] = n0(t.value); save(); render(); return; }
   if (t.id === "iaProvider") { lsSet(IA_KEY, t.value); renderIA(compute(state)); return; }
   if (t.dataset.prevu) {
     const m = state.months[+t.dataset.m];
@@ -1821,15 +1969,16 @@ document.addEventListener("change", (e) => {
     const item = state.months[+t.dataset.m][t.dataset.list][+t.dataset.j];
     const k = t.dataset.k;
     item[k] = NUM_KEYS.has(k) ? n0(t.value) : t.value;
-    if (t.dataset.list === "ventes" && k === "segment") {
-      const mk = state.months[+t.dataset.m].marketing[t.value];
-      if (mk && n0(mk.prix) && item.produit === "Agglomérés") { item.prix = n0(mk.prix); item.delai = n0(mk.delai); }
+    if (t.dataset.list === "ventes" && (k === "segment" || k === "produit")) {
+      const mk = state.months[+t.dataset.m].marketing[item.segment];
+      const planned = item.produit === "Agglomérés" ? n0(mk?.prix) : n0(mk?.["prix" + item.produit]);
+      if (mk && planned) { item.prix = clampPrix(item.segment, item.produit, planned); item.delai = n0(mk.delai); }
     }
     save(); render(); return;
   }
   if (t.dataset.mk) {
     const mk = state.months[+t.dataset.m].marketing;
-    if (t.dataset.mk === "pub") mk.pub = n0(t.value);
+    if (t.dataset.mk === "pub" || t.dataset.mk === "pubNat") mk[t.dataset.mk] = n0(t.value);
     else if (t.dataset.mkk === "prix" && n0(t.value)) {
       const c2 = clampPrix(t.dataset.mk, "Agglomérés", t.value);
       if (c2 !== n0(t.value)) toast(`Prix ramené à ${c2} € (fourchette du jeu)`);

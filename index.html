@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Pilotage Bouchons</title>
   <meta name="description" content="Suivi de trésorerie, de stock et conseiller stratégique pour le jeu d'entreprise (distributeur de bouchons de liège).">
-  <link rel="stylesheet" href="style.css?v=2.0">
+  <link rel="stylesheet" href="style.css?v=2.1">
 </head>
 <body>
   <header class="topbar">
@@ -53,6 +53,7 @@
           <a href="#g-principes">Principes de calcul</a>
           <a href="#g-dashboard">Tableau de bord</a>
           <a href="#g-mois">Saisie du mois</a>
+          <a href="#g-naturels">Bouchons naturels</a>
           <a href="#g-stock">Stock</a>
           <a href="#g-revient">Coût de revient</a>
           <a href="#g-simu">Simulateur d'offre</a>
@@ -152,6 +153,17 @@
           <li><b>Charges automatiques</b> : le récapitulatif de ce que le site compte tout seul ce mois-là.</li>
           <li><b>Notes</b> : texte libre pour chaque phase ; l'IA les lit.</li>
         </ul>
+      </div>
+
+      <div class="card" id="g-naturels">
+        <h2>Bouchons naturels, investissements et changements de paramètres</h2>
+        <table class="gtable"><tbody>
+          <tr><th>Changements en cours de jeu</th><td>Paramètres &amp; partage. Un paramètre (salaires, structure, taux de stockage) change <b>à partir d'un mois</b> : les mois d'avant gardent l'ancienne valeur. Exemple : salaires 150 000 € à partir de Mars.</td></tr>
+          <tr><th>Investissements</th><td>Paramètres &amp; partage. Payés comptant au mois choisi (sortie de trésorerie). Chaque mois suivant, une <b>dotation aux amortissements</b> = montant ÷ (durée × 12) est comptée en charge dans le résultat, le coût de revient et le prix minimum rentable, sans sortie d'argent. Exemple : trieuses 30 000 € sur 5 ans → 500 €/mois.</td></tr>
+          <tr><th>Matières (bouchons naturels)</th><td>Bouchons Espagne / Portugal / Maroc A, B, C. Elles s'achètent comme les autres lots à l'étape B (produit = la matière). Le stock racheté à STECKER (285 000 €, payé en Mars) se saisit comme un achat validé de matières, livraison instantanée, payé comptant en Mars.</td></tr>
+          <tr><th>Production (trieuses)</th><td>Saisie du mois, carte « Production ». Chaque lot de matière trié devient des semi-finis Q1–Q4 selon les pourcentages du tableau « Trieuses » (modifiables dans Paramètres). <div class="formula">Coût d'un lot Q produit = coût moyen de la matière + frais de fabrication (2 €)</div> Les frais de fabrication sont payés le mois de la production. Hypothèse : les Q1–Q4 produits sont vendables le mois même.</td></tr>
+          <tr><th>Prix Q1–Q4 et niveau de publicité</th><td>Planification : chaque segment a des prix Q1–Q4 (comme dans le jeu) et un <b>niveau de publicité</b> ciblé : Aucune, Flyers 10 000 €, E-mailing 20 000 €, Visite de l'usine 50 000 €. Ces coûts, la publicité agglomérés et la publicité bouchons naturels sont comptés dans « Publicité / marketing ». Une vente de Q1–Q4 dans « Autres ventes » reprend le prix planifié du segment.</td></tr>
+        </tbody></table>
       </div>
 
       <div class="card" id="g-stock">
@@ -272,6 +284,6 @@
   <div id="toast" class="toast" hidden></div>
   <section id="report" class="report" aria-hidden="true"></section>
 
-  <script type="module" src="app.js?v=2.0"></script>
+  <script type="module" src="app.js?v=2.1"></script>
 </body>
 </html>
