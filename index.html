@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Pilotage Bouchons</title>
   <meta name="description" content="Suivi de trésorerie, de stock et conseiller stratégique pour le jeu d'entreprise (distributeur de bouchons de liège).">
-  <link rel="stylesheet" href="style.css?v=2.6">
+  <link rel="stylesheet" href="style.css?v=2.7">
 </head>
 <body>
   <header class="topbar">
@@ -188,6 +188,7 @@
         <p>Cet onglet applique la <b>méthode des coûts complets</b> du support de contrôle de gestion. Il sert à fixer vos prix de vente pour atteindre une marge donnée, et à voir quel produit et quel marché rapportent le plus.</p>
         <div class="formula">Coût de revient = (Coûts de production + Coûts hors production) ÷ Quantité vendue</div>
         <table class="gtable"><tbody>
+          <tr><th>Coût de revient par produit</th><td>Tableau en haut de l'onglet : Agglomérés, Q1, Q2, Q3, Q4, utilisable <b>avant</b> les ventes pour fixer les prix. <div class="formula">Coût de revient / lot = coût d'achat ou de production + charges du mois réparties ÷ volume du produit</div> Coût d'achat / production : coût moyen du stock ; à défaut, prix marché (agglomérés) ou coût de la matière en stock + 2 € de tri (Q1–Q4 ont le même coût de production). Volume : lots vendus ce mois, sinon besoins annoncés. Charges réparties au prorata du CA prévu (volume × prix planifié, sinon milieu de fourchette). Pour chaque segment, badge « perte » si le prix max est sous le coût de revient, « marge &lt; X % » si rentable mais sous la marge visée.</td></tr>
           <tr><th>Mois analysé</th><td>Par défaut, le dernier mois (jusqu'au mois en cours) où il y a des ventes : le support travaille toujours sur le cycle précédent. Vous pouvez choisir un autre mois.</td></tr>
           <tr><th>Coûts de production</th><td>Valeur des sorties de stock = lots vendus × CMUP (coût moyen pondéré) du produit ce mois-ci. C'est le « coût des lots vendus » du résultat.</td></tr>
           <tr><th>Coûts hors production</th><td>Salaires + frais de structure + frais de stockage (0,33 % du stock final) + publicité + transport + autres dépenses (dont dotations aux amortissements si vous en saisissez).</td></tr>
@@ -289,6 +290,6 @@
   <div id="toast" class="toast" hidden></div>
   <section id="report" class="report" aria-hidden="true"></section>
 
-  <script type="module" src="app.js?v=2.6"></script>
+  <script type="module" src="app.js?v=2.7"></script>
 </body>
 </html>

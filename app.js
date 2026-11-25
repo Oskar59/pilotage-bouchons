@@ -2,7 +2,7 @@
 // Tout est stocké dans le navigateur (localStorage). Partage via export JSON ou lien.
 
 // Numéro de version affiché dans l'en-tête : à augmenter à chaque mise à jour du site
-const APP_VERSION = "2.6";
+const APP_VERSION = "2.7";
 const APP_DATE = "25/11/2026";
 const STORE_KEY = "pilotage-bouchons-v1";
 const KEY_KEY = "pilotage-bouchons-apikey";          // clé Claude (navigateur uniquement)
@@ -836,6 +836,8 @@ function printDossierIA() {
       ["Encaissements clients à venir / paiements fournisseurs à venir", `${fmtE(c.aEncaisser)} / ${fmtE(c.aPayer)}`],
     ])}</div>
 
+    <div class="card"><h3>Coût de revient par produit (marge visée ${Math.min(95, Math.max(0, n0(ui.rev.marge)))} %)</h3>${revientProduitsHtml(c, i, "ca", Math.min(95, Math.max(0, n0(ui.rev.marge))), true)}</div>
+
     <h2>2. Stock</h2>
     <div class="card">${tbl(["Produit", `Fin ${esc(m.nom)} (lots)`, "Coût moyen", "Valeur", nx ? `Disponible début ${esc(nx.nom)}` : "—"], stockProds.map((x) => [x, fmtN(r.finP[x]), r.finP[x] ? fmtP(r.cmupP[x]) : "—", fmtE(Math.max(0, r.finP[x]) * r.cmupP[x]), nx ? fmtN(nx.dispoP[x]) : "—"]))}</div>
 
@@ -919,6 +921,60 @@ function revientMois(c, i, cle = "ca") {
   };
 }
 
+// Coût de revient par lot pour chaque produit (Agglomérés, Q1–Q4), utilisable avant les ventes :
+// coût d'achat / de production (CMUP, sinon estimation) + charges indirectes du mois réparties par clé
+// sur le volume du mois (lots vendus, sinon besoins annoncés).
+function revientProduits(c, i, cle = "ca") {
+  const r = c.rows[i], m = state.months[i], pp = state.production;
+  const totInd = revientMois(c, i, cle).totInd;
+  const vendus = {};
+  ventesDuMois(m).forEach((v) => { const p = normProduit(v.produit); vendus[p] = (vendus[p] || 0) + n0(v.lots); });
+  const cuQestim = (() => {
+    let l = 0, v = 0;
+    MATIERES.forEach((x) => { const q = r.dispoP[x] || 0; if (q > 0 && r.cmupP[x] > 0) { l += q; v += q * r.cmupP[x]; } });
+    if (l) return { v: v / l + n0(pp.frais), src: "matière en stock + tri" };
+    const pm = Object.values(pp.prixMarche || {}).map(n0).filter(Boolean);
+    return pm.length ? { v: pm.reduce((a, b) => a + b, 0) / pm.length + n0(pp.frais), src: "prix marché matière + tri" } : { v: NaN, src: "inconnu" };
+  })();
+  const rows = ["Agglomérés", ...QS].map((p) => {
+    let cu = r.cmupP[p], src = "coût moyen du stock";
+    if (!(cu > 0)) { if (p === "Agglomérés") { cu = n0(state.params.prixMarche); src = "prix marché"; } else { cu = cuQestim.v; src = cuQestim.src; } }
+    let vol = vendus[p] || 0, volSrc = "vendus ce mois";
+    if (!vol) { vol = besoinTotal(p, i); volSrc = vol ? "besoins annoncés" : "aucun volume"; }
+    let num = 0, den = 0;
+    SEGMENTS.forEach((sg) => {
+      const rg = range(sg, p); if (!rg) return;
+      const pl = p === "Agglomérés" ? n0(m.marketing[sg]?.prix) : n0(m.marketing[sg]?.["prix" + p]);
+      const w = besoin(sg, p, i) || 1;
+      num += (pl ? clampPrix(sg, p, pl) : (rg[0] + rg[1]) / 2) * w; den += w;
+    });
+    return { p, cu, src, vol, volSrc, prixRef: den ? num / den : 0 };
+  });
+  const poids = (x) => (cle === "ca" ? x.vol * x.prixRef : x.vol);
+  const keyTot = rows.reduce((t, x) => t + poids(x), 0);
+  rows.forEach((x) => {
+    x.part = keyTot ? poids(x) / keyTot : 0;
+    x.chargesLot = x.vol ? (totInd * x.part) / x.vol : NaN;
+    x.crLot = x.cu + x.chargesLot;
+  });
+  return { rows, totInd };
+}
+function revientProduitsHtml(c, i, cle, tm, compact) {
+  const { rows, totInd } = revientProduits(c, i, cle);
+  const cible = (v) => (Number.isFinite(v) ? v / (1 - tm / 100) : NaN);
+  const segCell = (sg, x) => {
+    const rg = range(sg, x.p); if (!rg) return "—";
+    if (!Number.isFinite(x.crLot)) return `${rg[0]}–${rg[1]} €`;
+    const b = rg[1] < x.crLot ? `<span class="badge crit">perte</span>` : rg[1] < cible(x.crLot) ? `<span class="badge warn">marge &lt; ${tm} %</span>` : `<span class="badge good">OK</span>`;
+    return `${rg[0]}–${rg[1]} € ${compact ? "" : b}`;
+  };
+  return `<div class="table-wrap"><table>
+    <thead><tr><th>Produit</th><th class="r">Coût d'achat / production</th><th class="r">Volume du mois</th><th class="r">Charges / lot</th><th class="r">Coût de revient / lot</th><th class="r">Prix pour ${tm} %</th>${SEGMENTS.map((sg) => `<th>${SEG_LABEL[sg]}</th>`).join("")}</tr></thead>
+    <tbody>${rows.map((x) => `<tr><td><b>${x.p}</b></td><td class="r">${fmtP(x.cu)}<br><span class="muted small">${esc(x.src)}</span></td><td class="r">${fmtN(x.vol)}<br><span class="muted small">${esc(x.volSrc)}</span></td><td class="r">${fmtP(x.chargesLot)}</td><td class="r"><b>${fmtP(x.crLot)}</b></td><td class="r">${fmtP(cible(x.crLot))}</td>${SEGMENTS.map((sg) => `<td class="small">${segCell(sg, x)}</td>`).join("")}</tr>`).join("")}</tbody>
+  </table></div>
+  ${compact ? "" : `<p class="muted small">Coût de revient / lot = coût d'achat ou de production + charges du mois (${fmtE(totInd)} : salaires, structure, stockage, pub, amortissements, transport, autres) réparties entre produits au prorata ${cle === "ca" ? "du chiffre d'affaires prévu (volume × prix planifié, sinon milieu de fourchette)" : "des lots"}. Volume = lots vendus ce mois, sinon besoins annoncés (tous segments). Un lot Q coûte le coût de la matière triée + ${fmtP(n0(state.production.frais))} de tri (les 4 qualités ont le même coût de production). Badges : <b>perte</b> = même le prix max de la fourchette est sous le coût de revient ; <b>marge &lt; ${tm} %</b> = rentable mais sous la marge visée.</p>`}`;
+}
+
 function renderRevient(c) {
   const el = document.getElementById("tab-revient");
   if (!el) return;
@@ -969,6 +1025,11 @@ function renderRevient(c) {
       <div class="card kpi"><div class="label">Coût de revient par lot</div><div class="value">${fmtP(cuG)}</div><div class="hint">${fmtN(g.lots)} lots vendus</div></div>
       <div class="card kpi"><div class="label">Prix moyen de vente</div><div class="value">${fmtP(pmG)}</div><div class="hint">marge ${fmtP(pmG - cuG)} / lot</div></div>
       <div class="card kpi"><div class="label">Prix pour ${tm} % de marge</div><div class="value">${fmtP(prixCible(cuG))}</div><div class="hint">= coût / lot ÷ (1 − ${tm} %)</div></div>
+    </div>
+
+    <div class="card section-gap">
+      <h2>Coût de revient par produit · ${esc(R.r.nom)}</h2>
+      ${revientProduitsHtml(c, i, cle, tm, false)}
     </div>
 
     <div class="grid c2 section-gap">
