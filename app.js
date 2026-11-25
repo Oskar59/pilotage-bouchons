@@ -2,7 +2,7 @@
 // Tout est stocké dans le navigateur (localStorage). Partage via export JSON ou lien.
 
 // Numéro de version affiché dans l'en-tête : à augmenter à chaque mise à jour du site
-const APP_VERSION = "2.3";
+const APP_VERSION = "2.4";
 const APP_DATE = "25/11/2026";
 const STORE_KEY = "pilotage-bouchons-v1";
 const KEY_KEY = "pilotage-bouchons-apikey";          // clé Claude (navigateur uniquement)
@@ -50,7 +50,7 @@ Guide « Nouvelles activités » (distributeur) :
 - Après tri : marquer et vendre aux clients (vignerons, caves, négociants/grands comptes), revendre sans marquage à d'autres distributeurs, ou stocker.
 - Clients : pour chaque type, positionnement sur le produit, le prix, le délai de paiement, la publicité et l'axe publicitaire. Pas obligé de servir tous les clients.
 - Besoins clients annoncés Mars–Juin (lots/mois) : Vignerons Q1 130/160/200/130, Q2 260/320/400/260, Q3 390/480/600/390, Q4 520/640/800/520, Agglomérés 200 ; Caves Q1 200, Q2 200, Q3 200, Q4 600, Agglomérés 1200 ; Grands comptes Q1 0, Q2 300, Q3 600, Q4 900, Agglomérés 6000.
-- Prix clients (min–max €) : Vignerons Q1 160–200, Q2 140–180, Q3 120–160, Q4 100–140, Agglo 40–80 ; Caves Q1 145–170, Q2 125–150, Q3 105–130, Q4 85–100, Agglo 25–50 ; Grands comptes Q1 130–150, Q2 110–130, Q3 90–110, Q4 70–90, Agglo 10–30.`;
+- Prix clients (min–max €) : Vignerons Q1 160–200, Q2 140–180, Q3 120–160, Q4 100–140, Agglo 40–80 ; Caves Q1 145–170, Q2 125–150, Q3 105–130, Q4 85–110, Agglo 25–50 ; Grands comptes Q1 130–150, Q2 110–130, Q3 90–110, Q4 70–90, Agglo 10–30.`;
 const besoin = (sg, pr, i) => n0(state.besoins?.[sg]?.[pr]?.[i]);
 const besoinTotal = (pr, i) => SEGMENTS.reduce((t, sg) => t + besoin(sg, pr, i), 0);
 const PARAM_CHANGEABLES = [["Salaires mensuels (€)", "salaires"], ["Frais de structure mensuels (€)", "structure"], ["Frais de stockage (%)", "stockageRate"]];
@@ -76,7 +76,7 @@ const TRANSPORTS = {
 };
 const DEFAULT_PRIX_CLIENTS = {
   Vignerons: { Q1: [160, 200], Q2: [140, 180], Q3: [120, 160], Q4: [100, 140], "Agglomérés": [40, 80] },
-  Caves: { Q1: [145, 170], Q2: [125, 150], Q3: [105, 130], Q4: [85, 100], "Agglomérés": [25, 50] },
+  Caves: { Q1: [145, 170], Q2: [125, 150], Q3: [105, 130], Q4: [85, 110], "Agglomérés": [25, 50] },
   "Négociants": { Q1: [130, 150], Q2: [110, 130], Q3: [90, 110], Q4: [70, 90], "Agglomérés": [10, 30] },
 };
 
@@ -216,9 +216,14 @@ function migrate(s) {
   if (out.rules && !out.rules.includes("Nouvelles activités")) out.rules += "\n" + RULES_GUIDE;
   if (!s.besoins) out.besoins = DEFAULT_BESOINS();
   out.months.forEach((m) => { m.livraisonsQ = m.livraisonsQ || {}; });
-  // Correction du guide : Caves Q4 max 100 € (et non 110 €) — seulement si l'ancienne valeur par défaut n'a pas été modifiée
-  const cq4 = out.prixClients?.Caves?.Q4;
-  if (cq4 && cq4[0] === 85 && cq4[1] === 110) out.prixClients.Caves.Q4 = [85, 100];
+  // Caves Q4 : le simulateur (Informations Clients) affiche 85–110 €, c'est lui qui fait foi.
+  // La v2.2 l'avait passé à 100 € d'après le guide PDF : on remet 110 € une seule fois.
+  if (!s.fixCavesQ4) {
+    const cq4 = out.prixClients?.Caves?.Q4;
+    if (cq4 && cq4[0] === 85 && cq4[1] === 100) out.prixClients.Caves.Q4 = [85, 110];
+    out.fixCavesQ4 = true;
+  }
+  if (out.rules) out.rules = out.rules.replace("Q4 85–100, Agglo 25–50", "Q4 85–110 (simulateur), Agglo 25–50");
   out.production.capacite = n0(s.production?.capacite);
   if (out.rules && !out.rules.includes("Positionnement Marketing")) out.rules += "\n" + RULES_PLANIF;
   if (out.rules && !out.rules.includes("rôle de distributeur")) out.rules += "\n" + RULES_DISTRIB;
