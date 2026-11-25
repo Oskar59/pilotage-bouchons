@@ -2,7 +2,7 @@
 // Tout est stocké dans le navigateur (localStorage). Partage via export JSON ou lien.
 
 // Numéro de version affiché dans l'en-tête : à augmenter à chaque mise à jour du site
-const APP_VERSION = "2.8";
+const APP_VERSION = "2.9";
 const APP_DATE = "25/11/2026";
 const STORE_KEY = "pilotage-bouchons-v1";
 const KEY_KEY = "pilotage-bouchons-apikey";          // clé Claude (navigateur uniquement)
@@ -461,6 +461,15 @@ function seuilHtml(r, compact) {
     : `<b>${fmtP(s.prix)}</b>/lot = coût d'achat ${fmtP(s.cm)} + charges ${fmtE(s.charges)} ÷ ${fmtN(s.vol)} lots <span class="muted">(${esc(s.base)})</span><br><span class="muted small">Autres volumes : ${ex}</span>`;
 }
 
+// Sous un champ de prix : fourchette, marge sur coût d'achat/production, rentable ou non (coût de revient du produit)
+function prodHint(seg, prod, prix, RP) {
+  const rg = range(seg, prod), x = RP[prod];
+  if (!n0(prix)) return `<span class="muted">Fourchette ${rg ? `${rg[0]}–${rg[1]} €` : "—"}${x && Number.isFinite(x.crLot) ? ` · rentable dès ${fmtP(x.crLot)}` : ""}</span>`;
+  const pe = clampPrix(seg, prod, prix);
+  const marge = x && Number.isFinite(x.cu) ? pe - x.cu : null;
+  const seuil = x?.crLot;
+  return `${priceBadge(seg, prod, n0(prix))}${marge !== null ? ` · marge <b class="${cls(marge)}">${fmtP(marge)}</b>/lot` : ""}${Number.isFinite(seuil) ? (pe >= seuil ? ` · <span class="badge good">rentable</span>` : ` · <span class="badge warn">sous le seuil (${fmtP(seuil)})</span>`) : ""}`;
+}
 function priceBadge(seg, prod, prix) {
   const r = range(seg, prod);
   if (!r || !n0(prix)) return "";
@@ -1488,6 +1497,8 @@ function renderMois(c) {
   const prodList = PRODUITS.map((p) => [p, p]);
   const segList = SEGMENTS.map((s) => [SEG_LABEL[s], s]);
   const cmA = r.cmupP["Agglomérés"];
+  const RProws = revientProduits(c, i, "ca").rows;
+  const RP = Object.fromEntries(RProws.map((x) => [x.p, x]));
   el.innerHTML = `
     <div class="month-pills">${state.months.map((mm, k) => `<button class="pill ${k === i ? "active" : ""} ${c.rows[k].tresoFin < 0 ? "neg-dot" : ""}" data-editmonth="${k}">${esc(mm.nom)}</button>`).join("")}</div>
 
@@ -1507,11 +1518,9 @@ function renderMois(c) {
           return `<div class="seg">
             <h3>${SEG_LABEL[s]}</h3>
             ${["Agglomérés", ...QS].some((pr) => besoin(s, pr, i)) ? `<p class="muted small" style="margin:-4px 0 8px">Besoins annoncés : ${["Agglomérés", ...QS].filter((pr) => besoin(s, pr, i)).map((pr) => `${pr === "Agglomérés" ? "Agglo" : pr} ${fmtN(besoin(s, pr, i))}`).join(" · ")}</p>` : ""}
-            <div class="q-grid q-first">${QS.map((q) => { const rq = range(s, q); return `<label class="field">Prix ${q} (€) <span class="muted small">${rq ? `${rq[0]}–${rq[1]}` : ""}</span><input type="number" step="0.5" data-mk="${s}" data-mkk="prix${q}" data-m="${i}" value="${esc(mk["prix" + q] || 0)}"></label>`; }).join("")}</div>
+            <div class="q-grid q-first">${QS.map((q) => { const rq = range(s, q); return `<label class="field">Prix ${q} (€) <span class="muted small">${rq ? `${rq[0]}–${rq[1]}` : ""}</span><input type="number" step="0.5" data-mk="${s}" data-mkk="prix${q}" data-m="${i}" value="${esc(mk["prix" + q] || 0)}"><span class="small prod-hint">${prodHint(s, q, n0(mk["prix" + q]), RP)}</span></label>`; }).join("")}</div>
             <label class="field">Prix Agglomérés (€/lot)<input type="number" step="0.5" data-mk="${s}" data-mkk="prix" data-m="${i}" value="${esc(mk.prix)}"></label>
-            <div class="small" style="margin:4px 0 8px">${n0(mk.prix) ? priceBadge(s, "Agglomérés", n0(mk.prix)) : `<span class="muted">Fourchette ${rg[0]}–${rg[1]} €</span>`}
-              ${marge !== null ? ` · marge <b class="${cls(marge)}">${fmtP(marge)}</b>/lot` : ""}
-              ${n0(mk.prix) && Number.isFinite(seuilRentable(r).prix) ? (clampPrix(s, "Agglomérés", mk.prix) >= seuilRentable(r).prix ? ` · <span class="badge good">rentable</span>` : ` · <span class="badge warn">sous le seuil (${fmtP(seuilRentable(r).prix)})</span>`) : ""}</div>
+            <div class="small" style="margin:4px 0 8px">${prodHint(s, "Agglomérés", n0(mk.prix), RP)}</div>
             <label class="field">Délai de paiement<select data-mk="${s}" data-mkk="delai" data-m="${i}">${opts(delaiList, mk.delai)}</select></label>
             <label class="field" style="margin-top:8px">Niveau de publicité (ciblage)${i < 2 ? ` <span class="muted small">(à partir de Mars)</span>` : ""}<select data-mk="${s}" data-mkk="ciblage" data-m="${i}">${opts(CIBLAGES.map(([l], k) => [l, k]), n0(mk.ciblage))}</select></label>
           </div>`;
@@ -1525,7 +1534,7 @@ function renderMois(c) {
         </div>
       </div>
       <p class="muted small">Coût moyen des agglomérés ce mois-ci : <b>${fmtP(cmA)}</b>/lot${c.rows[i + 1] && Math.abs(c.rows[i + 1].cmupP["Agglomérés"] - cmA) > 0.005 && c.rows[i + 1].dispoP["Agglomérés"] > 0 ? ` → <b>${fmtP(c.rows[i + 1].cmupP["Agglomérés"])}</b> en ${esc(c.rows[i + 1].nom)} après réception des achats` : ""}. Les prix et délais fixés ici servent de valeurs par défaut pour les ventes du mois.</p>
-      <div class="alert info"><span class="ico">€</span><span>${seuilHtml(r, true)}. Vendre en dessous de ce prix moyen fait perdre de l'argent ce mois-ci (coût d'achat + salaires + structure + stockage + pub + transport + autres dépenses).</span></div>
+      <div class="alert info"><span class="ico">€</span><span><b>Prix minimum rentable par produit</b> (coût de revient par lot) : ${RProws.map((x) => `${x.p === "Agglomérés" ? "Agglomérés" : x.p} <b>${fmtP(x.crLot)}</b>`).join(" · ")}.<br><span class="small">= coût d'achat ou de production du produit + sa part des charges du mois (salaires, structure, stockage, pub, amortissements, transport, autres), répartie au prorata du CA prévu, ÷ son volume (lots vendus, sinon besoins annoncés). Détail dans l'onglet Coût de revient.</span></span></div>
     </div>
     ${planifAideHtml(c, i)}
     ${prevuHtml(c, i)}
@@ -1646,14 +1655,14 @@ function renderStock(c) {
   el.innerHTML = `
     <div class="grid k4">
       <div class="card kpi"><div class="label">Stock fin ${esc(cur.nom)}</div><div class="value">${fmtN(cur.lotsFin)} lots</div><div class="hint">+ ${fmtN(cur.transit)} en transit</div></div>
-      <div class="card kpi"><div class="label">Coût moyen agglomérés</div><div class="value">${fmtP(cur.cmup)}</div><div class="hint">${(() => { const nx = c.rows[state.currentMonth + 1]; return nx && nx.dispoP["Agglomérés"] > 0 && Math.abs(nx.cmupP["Agglomérés"] - cur.cmup) > 0.005 ? `→ ${fmtP(nx.cmupP["Agglomérés"])} en ${esc(nx.nom)} après réception · ` : ""; })()}marché ≈ ${fmtP(n0(state.params.prixMarche))}<br>Vente rentable dès <b>${fmtP(seuilRentable(cur).prix)}</b>/lot</div></div>
+      <div class="card kpi"><div class="label">Coût moyen agglomérés</div><div class="value">${fmtP(cur.cmup)}</div><div class="hint">${(() => { const nx = c.rows[state.currentMonth + 1]; return nx && nx.dispoP["Agglomérés"] > 0 && Math.abs(nx.cmupP["Agglomérés"] - cur.cmup) > 0.005 ? `→ ${fmtP(nx.cmupP["Agglomérés"])} en ${esc(nx.nom)} après réception · ` : ""; })()}marché ≈ ${fmtP(n0(state.params.prixMarche))}<br>Vente rentable dès <b>${fmtP(revientProduits(c, state.currentMonth, "ca").rows[0].crLot)}</b>/lot</div></div>
       <div class="card kpi"><div class="label">Couverture</div><div class="value">${Number.isFinite(couverture) ? couverture.toLocaleString("fr-FR", { maximumFractionDigits: 1 }) + " mois" : "—"}</div><div class="hint">au rythme moyen de ${fmtN(avgVentes)} lots/mois vendus</div></div>
       <div class="card kpi"><div class="label">Coût de stockage du mois</div><div class="value">${fmtE(cur.stockage)}</div><div class="hint">${cur.stockageRate} % de la valeur du stock</div></div>
     </div>
     <div class="card section-gap">
-      <h2>Prix de vente minimum rentable · ${esc(cur.nom)}</h2>
-      <p class="seuil">${seuilHtml(cur, false)}</p>
-      <p class="muted small">C'est le prix moyen de vente par lot (agglomérés) en dessous duquel le mois est en perte : il couvre le coût d'achat des lots + salaires (${fmtE(cur.salaires)}) + structure (${fmtE(cur.structure)}) + amortissements (${fmtE(cur.dotations)}) + stockage (${fmtE(cur.stockage)}) + publicité (${fmtE(cur.pub)}) + transport et autres (${fmtE(cur.transport + cur.divers - cur.pub)}). Plus vous vendez de lots, plus ce prix baisse.</p>
+      <h2>Prix de vente minimum rentable par produit · ${esc(cur.nom)}</h2>
+      ${revientProduitsHtml(c, state.currentMonth, "ca", Math.min(95, Math.max(0, n0(ui.rev.marge))), false)}
+      <p class="muted small">Pour tous produits confondus : ${seuilHtml(cur, true)}. Plus vous vendez de lots, plus ces prix baissent.</p>
     </div>
     <div class="card">
       <h2>Stock par produit · fin ${esc(cur.nom)}</h2>
