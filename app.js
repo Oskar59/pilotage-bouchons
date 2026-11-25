@@ -2,7 +2,7 @@
 // Tout est stocké dans le navigateur (localStorage). Partage via export JSON ou lien.
 
 // Numéro de version affiché dans l'en-tête : à augmenter à chaque mise à jour du site
-const APP_VERSION = "2.1";
+const APP_VERSION = "2.2";
 const APP_DATE = "25/11/2026";
 const STORE_KEY = "pilotage-bouchons-v1";
 const KEY_KEY = "pilotage-bouchons-apikey";          // clé Claude (navigateur uniquement)
@@ -25,6 +25,7 @@ const QS = ["Q1", "Q2", "Q3", "Q4"];
 const PRIX_MATIERES = { "Bouchons Espagne A": 55, "Bouchons Espagne B": 60, "Bouchons Espagne C": 65 };
 const DEFAULT_PRODUCTION = {
   frais: 2,
+  capacite: 0, // capacité de tri (lots/mois), 0 = non renseignée
   prixMarche: { ...PRIX_MATIERES },
   rendements: {
     "Bouchons Espagne A": [15, 30, 30, 25], "Bouchons Espagne B": [20, 30, 30, 20], "Bouchons Espagne C": [25, 30, 25, 20],
@@ -35,6 +36,23 @@ const DEFAULT_PRODUCTION = {
 // Ciblage marketing par segment (à partir du mois 3) : niveau → coût HT
 const CIBLAGES = [["Aucune", 0], ["Flyers (10 000 €)", 10000], ["E-mailing (20 000 €)", 20000], ["Visite de l'usine (50 000 €)", 50000]];
 const coutCiblage = (m) => SEGMENTS.reduce((t, sg) => t + (CIBLAGES[n0(m.marketing?.[sg]?.ciblage)]?.[1] || 0), 0);
+// Besoins clients annoncés (guide « Nouvelles activités ») : segment → produit → { index du mois : lots }
+const BESOINS_GUIDE = {
+  Vignerons: { Q1: [130, 160, 200, 130], Q2: [260, 320, 400, 260], Q3: [390, 480, 600, 390], Q4: [520, 640, 800, 520], "Agglomérés": [200, 200, 200, 200] },
+  Caves: { Q1: [200, 200, 200, 200], Q2: [200, 200, 200, 200], Q3: [200, 200, 200, 200], Q4: [600, 600, 600, 600], "Agglomérés": [1200, 1200, 1200, 1200] },
+  "Négociants": { Q1: [0, 0, 0, 0], Q2: [300, 300, 300, 300], Q3: [600, 600, 600, 600], Q4: [900, 900, 900, 900], "Agglomérés": [6000, 6000, 6000, 6000] },
+};
+const DEFAULT_BESOINS = () => Object.fromEntries(SEGMENTS.map((sg) => [sg, Object.fromEntries(Object.entries(BESOINS_GUIDE[sg]).map(([pr, v]) => [pr, Object.fromEntries(v.map((x, k) => [k + 2, x]))]))]));
+const RULES_GUIDE = `
+Guide « Nouvelles activités » (distributeur) :
+- Les distributeurs achètent des lots de bouchons naturels tubés (Espagne A, B, C) aux industriels ou à d'autres distributeurs. Livrés au mois M+1, facturés à la commande.
+- Tri : 4 qualités Q1 (moins de défauts) à Q4 (plus de défauts) ; la qualité dépend du type de planche (Espagne A/B/C). Frais de tri 2 € par lot en entrée. Capacité de tri indiquée dans le simulateur ; marquage illimité.
+- Après tri : marquer et vendre aux clients (vignerons, caves, négociants/grands comptes), revendre sans marquage à d'autres distributeurs, ou stocker.
+- Clients : pour chaque type, positionnement sur le produit, le prix, le délai de paiement, la publicité et l'axe publicitaire. Pas obligé de servir tous les clients.
+- Besoins clients annoncés Mars–Juin (lots/mois) : Vignerons Q1 130/160/200/130, Q2 260/320/400/260, Q3 390/480/600/390, Q4 520/640/800/520, Agglomérés 200 ; Caves Q1 200, Q2 200, Q3 200, Q4 600, Agglomérés 1200 ; Grands comptes Q1 0, Q2 300, Q3 600, Q4 900, Agglomérés 6000.
+- Prix clients (min–max €) : Vignerons Q1 160–200, Q2 140–180, Q3 120–160, Q4 100–140, Agglo 40–80 ; Caves Q1 145–170, Q2 125–150, Q3 105–130, Q4 85–100, Agglo 25–50 ; Grands comptes Q1 130–150, Q2 110–130, Q3 90–110, Q4 70–90, Agglo 10–30.`;
+const besoin = (sg, pr, i) => n0(state.besoins?.[sg]?.[pr]?.[i]);
+const besoinTotal = (pr, i) => SEGMENTS.reduce((t, sg) => t + besoin(sg, pr, i), 0);
 const PARAM_CHANGEABLES = [["Salaires mensuels (€)", "salaires"], ["Frais de structure mensuels (€)", "structure"], ["Frais de stockage (%)", "stockageRate"]];
 const RULES_MARS = `
 Annonce du mois de mars (mois 3) :
@@ -58,7 +76,7 @@ const TRANSPORTS = {
 };
 const DEFAULT_PRIX_CLIENTS = {
   Vignerons: { Q1: [160, 200], Q2: [140, 180], Q3: [120, 160], Q4: [100, 140], "Agglomérés": [40, 80] },
-  Caves: { Q1: [145, 170], Q2: [125, 150], Q3: [105, 130], Q4: [85, 110], "Agglomérés": [25, 50] },
+  Caves: { Q1: [145, 170], Q2: [125, 150], Q3: [105, 130], Q4: [85, 100], "Agglomérés": [25, 50] },
   "Négociants": { Q1: [130, 150], Q2: [110, 130], Q3: [90, 110], Q4: [70, 90], "Agglomérés": [10, 30] },
 };
 
@@ -98,7 +116,7 @@ const uid = () => Math.random().toString(36).slice(2, 9);
 const n0 = (v) => (Number.isFinite(+v) ? +v : 0);
 const emptyMarketing = () => ({ Vignerons: { prix: 0, delai: 0, ciblage: 0 }, Caves: { prix: 0, delai: 0, ciblage: 0 }, "Négociants": { prix: 0, delai: 0, ciblage: 0 }, pub: 0 });
 const emptyLivraisons = () => Object.fromEntries(SEGMENTS.map((s) => [s, { demande: 0, livre: 0 }]));
-const emptyMonth = (nom) => ({ nom, marketing: emptyMarketing(), livraisons: emptyLivraisons(), achats: [], ventes: [], depenses: [], production: [], planif: "", nego: "" });
+const emptyMonth = (nom) => ({ nom, marketing: emptyMarketing(), livraisons: emptyLivraisons(), achats: [], ventes: [], depenses: [], production: [], livraisonsQ: {}, planif: "", nego: "" });
 
 function defaultState() {
   return {
@@ -112,6 +130,7 @@ function defaultState() {
     paramChanges: [],      // [{ id, mois, cle, valeur }] : un paramètre change à partir d'un mois
     investissements: [],   // [{ id, libelle, montant, mois, duree (années) }] : payé comptant, amorti
     production: structuredClone(DEFAULT_PRODUCTION),
+    besoins: DEFAULT_BESOINS(),
     rules: DEFAULT_RULES,
     chat: [],
   };
@@ -194,6 +213,13 @@ function migrate(s) {
   out.investissements = Array.isArray(s.investissements) ? s.investissements : [];
   out.production = { frais: s.production?.frais ?? DEFAULT_PRODUCTION.frais, prixMarche: { ...DEFAULT_PRODUCTION.prixMarche, ...(s.production?.prixMarche || {}) }, rendements: { ...structuredClone(DEFAULT_PRODUCTION.rendements), ...(s.production?.rendements || {}) } };
   if (out.rules && !out.rules.includes("liquidation judiciaire")) out.rules += "\n" + RULES_MARS;
+  if (out.rules && !out.rules.includes("Nouvelles activités")) out.rules += "\n" + RULES_GUIDE;
+  if (!s.besoins) out.besoins = DEFAULT_BESOINS();
+  out.months.forEach((m) => { m.livraisonsQ = m.livraisonsQ || {}; });
+  // Correction du guide : Caves Q4 max 100 € (et non 110 €) — seulement si l'ancienne valeur par défaut n'a pas été modifiée
+  const cq4 = out.prixClients?.Caves?.Q4;
+  if (cq4 && cq4[0] === 85 && cq4[1] === 110) out.prixClients.Caves.Q4 = [85, 100];
+  out.production.capacite = n0(s.production?.capacite);
   if (out.rules && !out.rules.includes("Positionnement Marketing")) out.rules += "\n" + RULES_PLANIF;
   if (out.rules && !out.rules.includes("rôle de distributeur")) out.rules += "\n" + RULES_DISTRIB;
   out.rules = out.rules.replace("(« À la commande » ou plus)", "(comptant, 30 jours ou 60 jours)");
@@ -243,7 +269,11 @@ function ventesDuMois(m) {
     segment: sg, client: SEG_LABEL[sg], produit: "Agglomérés", lots: n0(m.livraisons?.[sg]?.livre),
     prix: clampPrix(sg, "Agglomérés", m.marketing[sg].prix), delai: n0(m.marketing[sg].delai), transport: "", coutTransport: 0, auto: true,
   })).filter((v) => v.lots > 0);
-  return [...seg, ...m.ventes];
+  const segQ = SEGMENTS.flatMap((sg) => QS.map((q) => ({
+    segment: sg, client: SEG_LABEL[sg], produit: q, lots: n0(m.livraisonsQ?.[sg]?.[q]?.livre),
+    prix: clampPrix(sg, q, m.marketing[sg]?.["prix" + q]), delai: n0(m.marketing[sg]?.delai), transport: "", coutTransport: 0, auto: true,
+  }))).filter((v) => v.lots > 0);
+  return [...seg, ...segQ, ...m.ventes];
 }
 // Valeur d'un paramètre au mois i (en tenant compte des changements en cours de jeu)
 function paramAt(s, i, k) {
@@ -334,6 +364,10 @@ function compute(s) {
     }
     const demande = SEGMENTS.reduce((t, sg) => t + n0(m.livraisons?.[sg]?.demande), 0);
     const perdue = SEGMENTS.reduce((t, sg) => t + Math.max(0, n0(m.livraisons?.[sg]?.demande) - n0(m.livraisons?.[sg]?.livre)), 0);
+    const perdueQ = SEGMENTS.reduce((t, sg) => t + QS.reduce((u, q) => u + Math.max(0, n0(m.livraisonsQ?.[sg]?.[q]?.demande) - n0(m.livraisonsQ?.[sg]?.[q]?.livre)), 0), 0);
+    const demandeQ = SEGMENTS.reduce((t, sg) => t + QS.reduce((u, q) => u + n0(m.livraisonsQ?.[sg]?.[q]?.demande), 0), 0);
+    const capTri = n0((s.production || {}).capacite);
+    const triDepasse = capTri > 0 && prodLots > capTri;
     let transit = 0;
     for (let k = i + 1; k < H; k++) for (const a of Object.values(arrivals[k])) transit += a.lots;
     const stockageRate = paramAt(s, i, "stockageRate");
@@ -358,7 +392,7 @@ function compute(s) {
     rows.push({
       i, nom: m.nom, tresoDebut, encaissements: enc[i], paiementsAchats: decAch[i], fixes, stockage, transport, divers, pub,
       decaissements: decaiss, tresoFin, cmdLots, cmdVal, recLots, recVal, venLots, ca, coutVentes, lotsDebut, lotsFin, valFin, transit,
-      salaires, structure, stockageRate, dotations, ciblage, investDec, fabrication, prodLots, prodOut, prodNeg,
+      salaires, structure, stockageRate, dotations, ciblage, perdueQ, demandeQ, triDepasse, capTri, investDec, fabrication, prodLots, prodOut, prodNeg,
       demande, perdue, transportVentes, cmup: cmupP["Agglomérés"], cmupP, dispoP, finP, venteP, resultat, cumRes, marge: ca - coutVentes, rse, stockNeg,
     });
     treso = tresoFin;
@@ -451,6 +485,8 @@ function modeleDemande(obs) {
 }
 // Demande totale attendue : moyenne des 3 derniers mois (≤ i) où une demande a été saisie
 function demandeAttendue(i) {
+  const annonce = besoinTotal("Agglomérés", i + 1) || besoinTotal("Agglomérés", i);
+  if (annonce) return annonce;
   const v = [];
   for (let k = Math.min(i, state.months.length - 1); k >= 0 && v.length < 3; k--) {
     const d = SEGMENTS.reduce((t, sg) => t + n0(state.months[k].livraisons?.[sg]?.demande), 0);
@@ -510,6 +546,70 @@ function productionHtml(c, i) {
         <td class="r">${fmtE(l * n0(pp.frais))}</td><td><button class="btn danger" data-del="production" data-j="${j}">✕</button></td></tr>`; }).join("")}</tbody>
     </table></div>
     <p class="small">Produit ce mois : ${QS.map((q) => `<b>${fmtN(r.prodOut[q])}</b> ${q}${r.prodOut[q] ? ` (coût ${fmtP(r.cmupP[q])})` : ""}`).join(" · ")}. Vendez-les dans « Autres ventes » (produit Q1 à Q4, fourchettes de prix dans Paramètres).</p>` : ""}
+  </div>`;
+}
+
+// Étape A pour les bouchons naturels Q1–Q4
+function stepAQHtml(c, i) {
+  const m = state.months[i], r = c.rows[i];
+  const rows = SEGMENTS.flatMap((sg) => QS.map((q) => ({ sg, q, lv: m.livraisonsQ?.[sg]?.[q] || { demande: 0, livre: 0 }, bes: besoin(sg, q, i), prix: n0(m.marketing[sg]?.["prix" + q]) })))
+    .filter((x) => x.bes || n0(x.lv.demande) || x.prix);
+  if (!rows.length) return i >= 2 ? `<p class="muted small section-gap">Bouchons naturels Q1–Q4 : aucun besoin annoncé ni prix planifié ce mois-ci.</p>` : "";
+  const dispo = QS.map((q) => `<b>${fmtN(r.dispoP[q])}</b> ${q}`).join(" · ");
+  const penurie = QS.filter((q) => SEGMENTS.reduce((t, sg) => t + n0(m.livraisonsQ?.[sg]?.[q]?.demande), 0) > r.dispoP[q] + 1e-6);
+  return `<h3 class="section-gap">Bouchons naturels Q1–Q4</h3>
+    <p class="muted small">Stock vendable ce mois (après tri) : ${dispo}. Prix = prix Q planifiés du segment (ramenés dans la fourchette). « Besoin annoncé » = tableau du guide (Paramètres).</p>
+    ${penurie.length ? `<div class="alert crit"><span class="ico">⚠</span><span><b>Pénurie</b> de ${penurie.join(", ")} : la demande dépasse le stock trié. Utilisez « Répartir automatiquement » ou triez plus de matière.</span></div>` : ""}
+    <div class="table-wrap"><table>
+      <thead><tr><th>Segment</th><th>Produit</th><th class="r">Prix effectif</th><th class="r">Besoin annoncé</th><th class="r">Demande</th><th class="r">Livré</th><th class="r">Perdu</th><th class="r">CA</th><th class="r">Marge</th></tr></thead>
+      <tbody>${rows.map((x) => {
+        const pe = clampPrix(x.sg, x.q, x.prix), perdu = Math.max(0, n0(x.lv.demande) - n0(x.lv.livre)), mg = n0(x.lv.livre) * (pe - (r.cmupP[x.q] || 0));
+        return `<tr><td>${SEG_LABEL[x.sg]}</td><td>${x.q}</td><td class="r">${x.prix ? fmtP(pe) : `<span class="muted" title="Prix non planifié : plancher de la fourchette">${fmtP(pe)}</span>`}</td><td class="r muted">${fmtN(x.bes)}</td>
+          <td class="r"><input type="number" min="0" data-livq="${x.sg}|${x.q}" data-livk="demande" data-m="${i}" value="${esc(x.lv.demande)}"></td>
+          <td class="r"><input type="number" min="0" data-livq="${x.sg}|${x.q}" data-livk="livre" data-m="${i}" value="${esc(x.lv.livre)}">${n0(x.lv.livre) > n0(x.lv.demande) ? ` <span class="badge crit">&gt; demande</span>` : ""}</td>
+          <td class="r ${perdu ? "neg" : ""}">${fmtN(perdu)}</td><td class="r">${fmtE(n0(x.lv.livre) * pe)}</td><td class="r ${cls(mg)}">${fmtE(mg)}</td></tr>`;
+      }).join("")}</tbody>
+    </table></div>`;
+}
+
+// Besoins annoncés du mois prochain vs stock prévu → quoi acheter (livraison M+1)
+function besoinsHtml(c, i) {
+  const nx = i + 1;
+  if (nx >= state.months.length) return "";
+  const prods = ["Agglomérés", ...QS];
+  const need = Object.fromEntries(prods.map((p) => [p, besoinTotal(p, nx)]));
+  if (!prods.some((p) => need[p])) return "";
+  const rn = c.rows[nx];
+  // matière déjà en stock ou attendue le mois prochain, convertible en Q
+  const matDispo = MATIERES.filter((x) => rn.dispoP[x] > 0);
+  const pp = state.production;
+  const potentielQ = Object.fromEntries(QS.map((q, k) => [q, rn.dispoP[q] + matDispo.reduce((t, x) => { const rd = pp.rendements[x] || [0, 0, 0, 0]; const tot = rd.reduce((a, b) => a + n0(b), 0) || 100; return t + rn.dispoP[x] * n0(rd[k]) / tot; }, 0)]));
+  const manque = Object.fromEntries(prods.map((p) => [p, Math.max(0, need[p] - (p === "Agglomérés" ? rn.dispoP[p] : potentielQ[p]))]));
+  const manqueQ = QS.map((q) => manque[q]);
+  // lots de matière Espagne A/B/C à acheter pour couvrir tous les Q manquants (la qualité la plus contraignante décide)
+  const options = MATIERES.filter((x) => pp.prixMarche[x] || /Espagne/.test(x)).map((x) => {
+    const rd = pp.rendements[x] || [25, 25, 25, 25]; const tot = rd.reduce((a, b) => a + n0(b), 0) || 100;
+    let lots = 0; QS.forEach((q, k) => { const y = n0(rd[k]) / tot; if (manqueQ[k] > 0) lots = Math.max(lots, y > 0 ? manqueQ[k] / y : Infinity); });
+    lots = Math.ceil(lots);
+    const cout = Number.isFinite(lots) && pp.prixMarche[x] ? lots * (n0(pp.prixMarche[x]) + n0(pp.frais)) : null;
+    const surplus = Number.isFinite(lots) ? QS.map((q, k) => Math.max(0, lots * n0(rd[k]) / tot - manqueQ[k])).reduce((a, b) => a + b, 0) : null;
+    return { x, lots, cout, surplus };
+  });
+  const anyQ = manqueQ.some((v) => v > 0);
+  const best = anyQ ? options.filter((o) => o.cout !== null).sort((a, b) => a.cout - b.cout)[0] : null;
+  return `<div class="card">
+    <h2>Besoins annoncés de ${esc(rn.nom)} → quoi acheter maintenant</h2>
+    <p class="muted small">Un achat chez un industriel ce mois-ci arrive en ${esc(rn.nom)}. Besoins = tableau du guide (tous segments). Stock prévu = stock restant + achats validés qui arrivent ; pour Q1–Q4, on compte aussi la matière disponible une fois triée.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Produit</th><th class="r">Besoin ${esc(rn.nom)}</th><th class="r">Stock prévu</th><th class="r">Manque</th></tr></thead>
+      <tbody>${prods.map((p) => `<tr><td>${p}</td><td class="r">${fmtN(need[p])}</td><td class="r">${fmtN(p === "Agglomérés" ? rn.dispoP[p] : potentielQ[p])}</td><td class="r ${manque[p] ? "neg" : ""}"><b>${fmtN(manque[p])}</b></td></tr>`).join("")}</tbody>
+    </table></div>
+    ${manque["Agglomérés"] ? `<div class="alert warn"><span class="ico">!</span><span>Agglomérés : négocier ≈ <b>${fmtN(Math.ceil(manque["Agglomérés"] * 1.1))} lots</b> (manque + 10 %).</span></div>` : ""}
+    ${anyQ ? `<p class="small section-gap"><b>Pour couvrir les Q1–Q4 manquants</b>, il faudrait trier (une seule matière) :</p>
+      <table><thead><tr><th>Matière</th><th class="r">Lots à acheter</th><th class="r">Coût estimé (achat + tri)</th><th class="r">Lots en trop</th></tr></thead><tbody>
+      ${options.map((o) => `<tr class="${o === best ? "current" : ""}"><td>${esc(o.x)}${o === best ? ` <span class="badge good">le moins cher</span>` : ""}</td><td class="r">${Number.isFinite(o.lots) ? fmtN(o.lots) : "—"}</td><td class="r">${o.cout !== null ? fmtE(o.cout) : "—"}</td><td class="r muted">${o.surplus !== null ? fmtN(o.surplus) : "—"}</td></tr>`).join("")}
+      </tbody></table>
+      <p class="muted small">La qualité la plus difficile à obtenir fixe la quantité ; les autres qualités sont produites en trop (stockables ou revendables à d'autres distributeurs). Coût estimé au prix moyen annoncé (55 / 60 / 65 €) + ${fmtP(n0(pp.frais))} de tri par lot. Vous n'êtes pas obligés de servir tous les besoins : comparez avec la marge de chaque produit.</p>` : `<div class="alert good"><span class="ico">✓</span><span>Q1–Q4 : le stock prévu couvre les besoins annoncés.</span></div>`}
   </div>`;
 }
 
@@ -1031,6 +1131,7 @@ function alertsFor(c) {
   c.rows.forEach((r) => {
     if (r.tresoFin < 0) out.push({ cls: "crit", t: `<b>${r.nom}</b> : trésorerie négative prévue (${fmtE(r.tresoFin)}).` });
     else if (r.tresoFin < n0(p.seuilTreso)) out.push({ cls: "warn", t: `<b>${r.nom}</b> : trésorerie sous le seuil de sécurité (${fmtE(r.tresoFin)} < ${fmtE(n0(p.seuilTreso))}).` });
+    if (r.triDepasse) out.push({ cls: "warn", t: `<b>${r.nom}</b> : ${fmtN(r.prodLots)} lots à trier pour une capacité de tri de ${fmtN(r.capTri)} lots/mois.` });
     if (r.prodNeg) out.push({ cls: "crit", t: `<b>${r.nom}</b> : production supérieure au stock de matière disponible (seule la quantité en stock est triée).` });
     if (r.stockNeg) {
       const pr = PRODUITS.filter((x) => r.finP[x] < 0).join(", ");
@@ -1184,6 +1285,7 @@ function renderMois(c) {
           const marge = n0(mk.prix) ? clampPrix(s, "Agglomérés", mk.prix) - cmA : null;
           return `<div class="seg">
             <h3>${SEG_LABEL[s]}</h3>
+            ${["Agglomérés", ...QS].some((pr) => besoin(s, pr, i)) ? `<p class="muted small" style="margin:-4px 0 8px">Besoins annoncés : ${["Agglomérés", ...QS].filter((pr) => besoin(s, pr, i)).map((pr) => `${pr === "Agglomérés" ? "Agglo" : pr} ${fmtN(besoin(s, pr, i))}`).join(" · ")}</p>` : ""}
             <label class="field">Prix Agglomérés (€/lot)<input type="number" step="0.5" data-mk="${s}" data-mkk="prix" data-m="${i}" value="${esc(mk.prix)}"></label>
             <div class="small" style="margin:4px 0 8px">${n0(mk.prix) ? priceBadge(s, "Agglomérés", n0(mk.prix)) : `<span class="muted">Fourchette ${rg[0]}–${rg[1]} €</span>`}
               ${marge !== null ? ` · marge <b class="${cls(marge)}">${fmtP(marge)}</b>/lot` : ""}
@@ -1228,17 +1330,19 @@ function renderMois(c) {
           const lv = m.livraisons[sg], pe = clampPrix(sg, "Agglomérés", m.marketing[sg].prix);
           const perdu = Math.max(0, n0(lv.demande) - n0(lv.livre));
           const mg = n0(lv.livre) * (pe - r.cmupP["Agglomérés"]);
-          return `<tr><td>${SEG_LABEL[sg]}</td><td class="r">${fmtP(pe)}</td><td>${DELAIS[n0(m.marketing[sg].delai)]}</td>
+          return `<tr><td>${SEG_LABEL[sg]}${besoin(sg, "Agglomérés", i) ? `<br><span class="muted small">besoin annoncé ${fmtN(besoin(sg, "Agglomérés", i))}</span>` : ""}</td><td class="r">${fmtP(pe)}</td><td>${DELAIS[n0(m.marketing[sg].delai)]}</td>
             <td class="r"><input type="number" min="0" data-liv="${sg}" data-livk="demande" data-m="${i}" value="${esc(lv.demande)}"></td>
             <td class="r"><input type="number" min="0" data-liv="${sg}" data-livk="livre" data-m="${i}" value="${esc(lv.livre)}"> ${n0(lv.livre) > n0(lv.demande) ? `<span class="badge crit">&gt; demande</span>` : ""}</td>
             <td class="r ${perdu ? "neg" : ""}">${fmtN(perdu)}</td><td class="r">${fmtE(n0(lv.livre) * pe)}</td><td class="r ${cls(mg)}">${fmtE(mg)}</td></tr>`;
         }).join("")}</tbody>
       </table></div>
+      ${stepAQHtml(c, i)}
     </div>
 
     <div class="card">
       <div class="row between"><h2>Étape B · Négociations (stock du mois prochain)</h2><button class="btn" data-add="achats">+ Ajouter un achat</button></div>
       ${(() => { const ac = alerteCommande(c, i); return ac ? `<div class="alert warn"><span class="ico">!</span><span>${alerteCommandeTexte(ac)}</span></div>` : ""; })()}
+      ${besoinsHtml(c, i).replace(/^<div class="card">/, '<div class="inner-card">')}
       <p class="muted small">Livraison industriel → distributeur : <b>30 jours</b> (le stock arrive le mois suivant). Distributeur → distributeur : instantané. Prix marché de référence agglomérés : ${fmtP(n0(state.params.prixMarche))}/lot.${c.rows[i + 1] && r.cmdLots ? ` Coût moyen des agglomérés en ${esc(c.rows[i + 1].nom)} après réception : <b>${fmtP(c.rows[i + 1].cmupP["Agglomérés"])}</b> (aujourd'hui ${fmtP(r.cmupP["Agglomérés"])}).` : ""} Dans le jeu, les agglomérés sont sous « Bouchons triés ». Seules les offres <b>validées</b> comptent dans les calculs ; une offre acceptée des deux côtés est irréversible.</p>
       <div class="table-wrap"><table>
         <thead><tr><th>Statut</th><th>Fournisseur</th><th>Produit</th><th class="r">Lots</th><th class="r">Prix/lot</th><th>Livraison</th><th>Paiement</th><th>Transport</th><th class="r">Coût transp. (€)</th><th class="r">Total</th><th></th></tr></thead>
@@ -1492,6 +1596,7 @@ function contextForAI(c) {
   }));
   const details = state.months.map((m) => ({
     mois: m.nom,
+    livraisonsQ: SEGMENTS.some((sg) => QS.some((q) => n0(m.livraisonsQ?.[sg]?.[q]?.demande))) ? Object.fromEntries(SEGMENTS.map((sg) => [sg, Object.fromEntries(QS.filter((q) => n0(m.livraisonsQ?.[sg]?.[q]?.demande)).map((q) => [q, { demande: n0(m.livraisonsQ[sg][q].demande), livre: n0(m.livraisonsQ[sg][q].livre), prixEffectif: clampPrix(sg, q, m.marketing[sg]?.["prix" + q]) }]))])) : undefined,
     production: (m.production || []).length ? m.production.map((x) => ({ matiere: x.matiere, lots: n0(x.lots) })) : undefined,
     planification: SEGMENTS.some((s) => n0(m.marketing[s].prix) || n0(m.marketing[s].ciblage)) || n0(m.marketing.pub) || n0(m.marketing.pubNat) ? {
       ...Object.fromEntries(SEGMENTS.map((s) => [s, { prixAgglo: n0(m.marketing[s].prix), ...Object.fromEntries(QS.filter((q) => n0(m.marketing[s]["prix" + q])).map((q) => ["prix" + q, n0(m.marketing[s]["prix" + q])])), delaiPaiement: DELAIS[n0(m.marketing[s].delai)], niveauPublicite: CIBLAGES[n0(m.marketing[s].ciblage)][0] }])), publiciteAgglomeres: n0(m.marketing.pub), publiciteBouchonsNaturels: n0(m.marketing.pubNat),
@@ -1501,11 +1606,12 @@ function contextForAI(c) {
     ventes: m.ventes.map((v) => ({ segment: v.segment, client: v.client, produit: v.produit, lots: n0(v.lots), prix: n0(v.prix), encaissement: DELAIS[n0(v.delai)], transport: v.transport || null })),
     autres: m.depenses.map((d) => ({ libelle: d.libelle, montant: n0(d.montant) })),
     notesPlanification: m.planif || undefined, notesNegociation: m.nego || undefined,
-  })).filter((m) => m.production || m.planification || m.livraisonsParSegment || m.achats.length || m.ventes.length || m.autres.length || m.notesPlanification || m.notesNegociation);
+  })).filter((m) => m.livraisonsQ || m.production || m.planification || m.livraisonsParSegment || m.achats.length || m.ventes.length || m.autres.length || m.notesPlanification || m.notesNegociation);
   return `<etat_entreprise mois_en_cours="${state.months[state.currentMonth].nom}">
 Paramètres : ${JSON.stringify(state.params)}
 Stock initial : ${JSON.stringify(state.stockInitial)}
 Changements de paramètres en cours de jeu (mois = index, 0 = Janvier) : ${JSON.stringify(state.paramChanges)}
+Besoins clients annoncés (segment → produit → {index mois: lots}) : ${JSON.stringify(state.besoins)}
 Investissements (payés comptant, amortis) : ${JSON.stringify(state.investissements)}
 Production (trieuses) : frais ${state.production.frais} €/lot en entrée ; rendements matière → [Q1,Q2,Q3,Q4] % : ${JSON.stringify(state.production.rendements)} ; prix moyen d'achat des matières : ${JSON.stringify(state.production.prixMarche)}
 Fourchettes de prix clients [min, max] €/lot : ${JSON.stringify(state.prixClients)}
@@ -1776,7 +1882,7 @@ function renderParams() {
     </div>
     <div class="card">
       <h2>Production · trieuses</h2>
-      <div class="form-grid">${f("production.frais", "Frais de fabrication (€ par lot en entrée)", state.production.frais, "0.01")}</div>
+      <div class="form-grid">${f("production.frais", "Frais de fabrication (€ par lot en entrée)", state.production.frais, "0.01")}${f("production.capacite", "Capacité de tri (lots/mois, 0 = inconnue)", state.production.capacite || 0)}</div>
       <p class="muted small section-gap">Rendements (tableau « Trieuses » du jeu) : part de chaque lot de matière qui devient Q1, Q2, Q3, Q4. Prix moyen d'achat : annonce du jeu (laisser vide si inconnu).</p>
       <div class="table-wrap"><table><thead><tr><th>Matière</th>${QS.map((q) => `<th class="r">${q} (%)</th>`).join("")}<th class="r">Prix d'achat moyen (€/lot)</th></tr></thead><tbody>
         ${MATIERES.map((mt) => `<tr><td>${esc(mt)}</td>${QS.map((q, k) => `<td class="r"><input type="number" class="sm" data-rend="${mt}|${k}" value="${state.production.rendements[mt]?.[k] ?? 0}"></td>`).join("")}<td class="r"><input type="number" class="sm" step="0.01" data-pmat="${mt}" value="${state.production.prixMarche[mt] ?? ""}"></td></tr>`).join("")}
@@ -1789,6 +1895,14 @@ function renderParams() {
         <thead><tr><th></th>${SEGMENTS.map((s) => `<th colspan="2">${SEG_LABEL[s]}</th>`).join("")}</tr>
         <tr><th>Produit</th>${SEGMENTS.map(() => `<th class="r">Min</th><th class="r">Max</th>`).join("")}</tr></thead>
         <tbody>${PRODUITS.map((pr) => `<tr><td>${pr}</td>${SEGMENTS.map((s) => [0, 1].map((k) => `<td class="r"><input type="number" class="sm" data-pc="${s}|${pr}|${k}" value="${state.prixClients[s]?.[pr]?.[k] ?? ""}"></td>`).join("")).join("")}</tr>`).join("")}</tbody>
+      </table></div>
+    </div>
+    <div class="card">
+      <h2>Besoins clients annoncés (lots par mois)</h2>
+      <p class="muted small">Tableau « Les clients » du guide Nouvelles activités. Sert aux besoins affichés en planification, à l'étape A et à la carte « quoi acheter maintenant ». Modifiez-le si le jeu annonce d'autres chiffres.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Segment</th><th>Produit</th>${state.months.map((m, k) => (k >= 2 ? `<th class="r">${esc(m.nom.slice(0, 4))}</th>` : "")).join("")}</tr></thead>
+        <tbody>${SEGMENTS.flatMap((sg) => ["Agglomérés", ...QS].map((pr) => `<tr><td>${SEG_LABEL[sg]}</td><td>${pr}</td>${state.months.map((m, k) => (k >= 2 ? `<td class="r"><input type="number" class="sm" data-bes="${sg}|${pr}|${k}" value="${state.besoins?.[sg]?.[pr]?.[k] ?? ""}"></td>` : "")).join("")}</tr>`)).join("")}</tbody>
       </table></div>
     </div>
     <div class="card">
@@ -1912,6 +2026,14 @@ document.addEventListener("click", (e) => {
       let dispo = compute(state).rows[i].dispoP["Agglomérés"] - m.ventes.filter((v) => v.produit === "Agglomérés").reduce((t, v) => t + n0(v.lots), 0);
       const order = [...SEGMENTS].sort((a, b) => (clampPrix(b, "Agglomérés", m.marketing[b].prix) - n0(m.marketing[b].delai) * 0.5) - (clampPrix(a, "Agglomérés", m.marketing[a].prix) - n0(m.marketing[a].delai) * 0.5));
       for (const sg of order) { const q = Math.min(n0(m.livraisons[sg].demande), Math.max(0, dispo)); m.livraisons[sg].livre = q; dispo -= q; }
+      // bouchons naturels Q1–Q4 : même règle, produit par produit
+      const rows0 = compute(state).rows[i];
+      QS.forEach((qq) => {
+        SEGMENTS.forEach((sg) => { if (m.livraisonsQ?.[sg]?.[qq]) m.livraisonsQ[sg][qq].livre = 0; });
+        let d = rows0.dispoP[qq] - m.ventes.filter((v) => v.produit === qq).reduce((t, v) => t + n0(v.lots), 0);
+        const ord = [...SEGMENTS].sort((a, b) => (clampPrix(b, qq, m.marketing[b]?.["prix" + qq]) - n0(m.marketing[b].delai) * 0.5) - (clampPrix(a, qq, m.marketing[a]?.["prix" + qq]) - n0(m.marketing[a].delai) * 0.5));
+        for (const sg of ord) { const lv = m.livraisonsQ?.[sg]?.[qq]; if (!lv) continue; const x = Math.min(n0(lv.demande), Math.max(0, Math.floor(d))); lv.livre = x; d -= x; }
+      });
       save(); render(); toast("Livraisons réparties : segments les mieux payés en priorité"); break;
     }
     case "clearChat": state.chat = []; save(); render(); break;
@@ -1954,6 +2076,12 @@ document.addEventListener("click", (e) => {
 
 document.addEventListener("change", (e) => {
   const t = e.target;
+  if (t.dataset.bes) {
+    const [sg, pr, k] = t.dataset.bes.split("|");
+    state.besoins = state.besoins || {}; state.besoins[sg] = state.besoins[sg] || {}; state.besoins[sg][pr] = state.besoins[sg][pr] || {};
+    if (t.value === "") delete state.besoins[sg][pr][k]; else state.besoins[sg][pr][k] = n0(t.value);
+    save(); render(); return;
+  }
   if (t.dataset.pchg) { const [j, k] = t.dataset.pchg.split("|"); state.paramChanges[+j][k] = k === "cle" ? t.value : n0(t.value); save(); render(); return; }
   if (t.dataset.inv) { const [j, k] = t.dataset.inv.split("|"); state.investissements[+j][k] = k === "libelle" ? t.value : n0(t.value); save(); render(); return; }
   if (t.dataset.rend) { const [mt, k] = t.dataset.rend.split("|"); state.production.rendements[mt] = state.production.rendements[mt] || [0, 0, 0, 0]; state.production.rendements[mt][+k] = n0(t.value); save(); render(); return; }
@@ -1984,6 +2112,21 @@ document.addEventListener("change", (e) => {
       if (c2 !== n0(t.value)) toast(`Prix ramené à ${c2} € (fourchette du jeu)`);
       mk[t.dataset.mk].prix = c2;
     } else mk[t.dataset.mk][t.dataset.mkk] = n0(t.value);
+    save(); render(); return;
+  }
+  if (t.dataset.livq) {
+    const [sg, q] = t.dataset.livq.split("|");
+    const m = state.months[+t.dataset.m];
+    m.livraisonsQ = m.livraisonsQ || {};
+    m.livraisonsQ[sg] = m.livraisonsQ[sg] || {};
+    const lv = m.livraisonsQ[sg][q] = m.livraisonsQ[sg][q] || { demande: 0, livre: 0 };
+    lv[t.dataset.livk] = Math.max(0, n0(t.value));
+    if (t.dataset.livk === "demande") {
+      const c = compute(state);
+      const dem = SEGMENTS.reduce((a, g) => a + n0(m.livraisonsQ?.[g]?.[q]?.demande), 0);
+      const autres = m.ventes.filter((v) => v.produit === q).reduce((a, v) => a + n0(v.lots), 0);
+      if (dem + autres <= c.rows[+t.dataset.m].dispoP[q] + 1e-6) SEGMENTS.forEach((g) => { if (m.livraisonsQ[g]?.[q]) m.livraisonsQ[g][q].livre = n0(m.livraisonsQ[g][q].demande); });
+    }
     save(); render(); return;
   }
   if (t.dataset.liv) {
