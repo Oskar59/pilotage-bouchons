@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Pilotage Bouchons</title>
   <meta name="description" content="Suivi de trésorerie, de stock et conseiller stratégique pour le jeu d'entreprise (distributeur de bouchons de liège).">
-  <link rel="stylesheet" href="style.css?v=2.9">
+  <link rel="stylesheet" href="style.css?v=2.10">
 </head>
 <body>
   <header class="topbar">
@@ -86,11 +86,11 @@
           <li>Chaque produit (Agglomérés, Q1 à Q4) a son propre stock.</li>
         </ul>
         <h3>Coût moyen (CMUP)</h3>
-        <div class="formula">Coût moyen = (Valeur du stock + Valeur des lots reçus) ÷ (Lots en stock + Lots reçus)</div>
-        <p>C'est le coût moyen pondéré : il est recalculé à chaque réception. Exemple : 12 000 lots à 25 € + 5 000 lots reçus à 21 € → (300 000 + 105 000) ÷ 17 000 = 23,82 €/lot. Les ventes sortent du stock à ce coût.</p>
-        <p><b>Quand change-t-il ?</b> Seulement au mois où les lots <b>arrivent</b> en stock. Un achat validé chez un industriel en janvier ne change donc le coût moyen qu'en février. Le site affiche à côté du coût actuel la valeur prévue le mois suivant, après réception (« → 23,82 € en Février »). Si tout le stock a été vendu, le coût moyen du mois suivant est simplement le prix des lots reçus.</p>
+        <div class="formula">Coût moyen = (Valeur du stock + Valeur des lots commandés ce mois) ÷ (Lots en stock + Lots commandés ce mois)</div>
+        <p>C'est le coût moyen pondéré, calculé <b>comme le jeu</b> : un achat compte dans le coût moyen <b>dès le mois de la commande</b>, même s'il n'arrive que le mois suivant. Exemple (votre janvier) : 12 000 lots à 25 € + 5 760 lots commandés à 20 € → (300 000 + 115 200) ÷ 17 760 = 23,38 €/lot. Les ventes du mois sortent du stock à ce coût.</p>
+        <p>Les lots en transit sont comptés dans la valeur du stock (donc dans les frais de stockage), comme dans le compte de résultat du jeu. Le stock <b>vendable</b>, lui, ne compte que les lots déjà reçus. Pour les bouchons naturels : un lot Q1–Q4 trié vaut le coût moyen de la matière ; les frais de tri (2 €/lot) sont une charge du mois.</p>
         <h3>Frais de stockage</h3>
-        <div class="formula">Stockage = 0,33 % × Valeur du stock en fin de mois (lots restants × coût moyen)</div>
+        <div class="formula">Stockage = 0,33 % × Valeur du stock en fin de mois (lots restants + lots en transit, au coût moyen)</div>
         <h3>Résultat (bénéfice ou perte)</h3>
         <div class="formula">Résultat = Chiffre d'affaires − Coût des lots vendus − Salaires − Frais de structure − Stockage − Publicité − Transport − Autres dépenses</div>
         <ul>
@@ -293,6 +293,6 @@
   <div id="toast" class="toast" hidden></div>
   <section id="report" class="report" aria-hidden="true"></section>
 
-  <script type="module" src="app.js?v=2.9"></script>
+  <script type="module" src="app.js?v=2.10"></script>
 </body>
 </html>

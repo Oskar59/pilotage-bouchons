@@ -17,7 +17,8 @@ Outil de pilotage pour le jeu d'entreprise « distributeur de bouchons de liège
 - Les lots achetés chez un industriel arrivent 30 jours plus tard (le mois suivant), chez un distributeur instantanément ; le paiement sort au mois choisi (mois même, M+1…).
 - Les ventes sont encaissées au mois choisi.
 - Salaires (40 000 €) et frais de structure (20 000 €) sont payés chaque mois.
-- Stockage = 0,33 % de la valeur du stock final (au CMUP).
+- CMUP calculé comme le jeu : un achat entre dans le coût moyen dès la commande (lots en transit compris) ; les frais de tri sont une charge du mois.
+- Stockage = 0,33 % de la valeur du stock final, transit compris (au CMUP).
 - Le stock de départ (12 000 lots × 25 €) est payé fin janvier.
 - Les fourchettes de prix clients (Informations Clients) sont modifiables dans Paramètres.
 

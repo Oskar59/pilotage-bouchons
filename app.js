@@ -2,7 +2,7 @@
 // Tout est stocké dans le navigateur (localStorage). Partage via export JSON ou lien.
 
 // Numéro de version affiché dans l'en-tête : à augmenter à chaque mise à jour du site
-const APP_VERSION = "2.9";
+const APP_VERSION = "2.10";
 const APP_DATE = "25/11/2026";
 const STORE_KEY = "pilotage-bouchons-v1";
 const KEY_KEY = "pilotage-bouchons-apikey";          // clé Claude (navigateur uniquement)
@@ -303,6 +303,9 @@ function compute(s) {
 
   const stock = Object.fromEntries(TOUS.map((pr) => [pr, { lots: 0, val: 0 }]));
   stock[si.produit] = { lots: n0(si.lots), val: n0(si.lots) * n0(si.prix) };
+  // Valorisation comme le jeu : un achat entre dans le coût moyen dès la commande (stock en transit compris)
+  const valo = Object.fromEntries(TOUS.map((pr) => [pr, { lots: 0, val: 0 }]));
+  valo[si.produit] = { lots: n0(si.lots), val: n0(si.lots) * n0(si.prix) };
   let treso = n0(p.capital);
   let cumRes = 0;
   const rows = [];
@@ -311,6 +314,7 @@ function compute(s) {
     const lotsDebut = TOUS.reduce((t, pr) => t + stock[pr].lots, 0);
     let cmdLots = 0, cmdVal = 0, transport = 0;
     const rse = {};
+    const cmdP = []; // commandes livrées plus tard : entrent dans le coût moyen après le tri (le tri utilise la matière déjà reçue)
     for (const a of achatsValides(m)) {
       const l = n0(a.lots), pr = n0(a.prix), prod = normProduit(a.produit);
       cmdLots += l; cmdVal += l * pr; transport += n0(a.coutTransport);
@@ -319,6 +323,7 @@ function compute(s) {
       arr[prod] = arr[prod] || { lots: 0, val: 0 };
       arr[prod].lots += l; arr[prod].val += l * pr;
       rse[a.transport] = (rse[a.transport] || 0) + l;
+      if (n0(a.livraison) === 0) { valo[prod].lots += l; valo[prod].val += l * pr; } else cmdP.push([prod, l, l * pr]);
     }
     // réceptions du mois
     let recLots = 0, recVal = 0;
@@ -334,20 +339,23 @@ function compute(s) {
       if (!MATIERES.includes(mat)) continue;
       const l = Math.max(0, n0(pl.lots));
       if (!l) continue;
-      const st = stock[mat];
+      const st = stock[mat], vo = valo[mat];
       if (l > st.lots + 1e-6) prodNeg = true;
       const take = Math.min(l, st.lots);
-      const cu = st.lots > 0 ? st.val / st.lots : 0;
+      const cu = vo.lots > 0 ? vo.val / vo.lots : 0;
       st.val -= take * cu; st.lots -= take;
+      vo.val -= take * cu; vo.lots -= take;
       const fr = n0(pp.frais);
       fabrication += take * fr; prodLots += take;
       const rd = pp.rendements?.[mat] || [25, 25, 25, 25];
       const tot = rd.reduce((a, b) => a + n0(b), 0) || 100;
-      QS.forEach((q, k) => { const o = take * n0(rd[k]) / tot; stock[q].lots += o; stock[q].val += o * (cu + fr); prodOut[q] += o; });
+      // Comme le jeu : les semi-finis valent le coût de la matière ; les frais de tri sont une charge du mois
+      QS.forEach((q, k) => { const o = take * n0(rd[k]) / tot; stock[q].lots += o; stock[q].val += o * cu; valo[q].lots += o; valo[q].val += o * cu; prodOut[q] += o; });
     }
+    for (const [prod, l, v] of cmdP) { valo[prod].lots += l; valo[prod].val += v; }
     const cmupP = {};
     const dispoP = {};
-    for (const pr of TOUS) { dispoP[pr] = stock[pr].lots; cmupP[pr] = stock[pr].lots > 0 ? stock[pr].val / stock[pr].lots : 0; }
+    for (const pr of TOUS) { dispoP[pr] = stock[pr].lots; cmupP[pr] = valo[pr].lots > 0 ? valo[pr].val / valo[pr].lots : 0; }
     let venLots = 0, ca = 0, coutVentes = 0, transportVentes = 0;
     const venteP = {};
     for (const v of ventesDuMois(m)) {
@@ -366,7 +374,9 @@ function compute(s) {
       if (lf < 0) stockNeg = true;
       // Un stock négatif (sur-vente) n'est pas reporté : le jeu ne permet pas de livrer plus que le stock
       stock[pr] = { lots: Math.max(0, lf), val: Math.max(0, lf) * cmupP[pr] };
-      finP[pr] = lf; lotsFin += lf; valFin += stock[pr].val;
+      const vl = Math.max(0, valo[pr].lots - (venteP[pr] || 0));
+      valo[pr] = { lots: vl, val: vl * cmupP[pr] };
+      finP[pr] = lf; lotsFin += lf; valFin += valo[pr].val; // valeur du stock (commandes en transit comprises, comme le jeu)
     }
     const demande = SEGMENTS.reduce((t, sg) => t + n0(m.livraisons?.[sg]?.demande), 0);
     const perdue = SEGMENTS.reduce((t, sg) => t + Math.max(0, n0(m.livraisons?.[sg]?.demande) - n0(m.livraisons?.[sg]?.livre)), 0);
@@ -393,7 +403,7 @@ function compute(s) {
     const decaiss = fixes + stockage + transport + divers + decAch[i] + fabrication + investDec;
     const tresoDebut = treso;
     const tresoFin = treso + enc[i] - decaiss;
-    const resultat = ca - coutVentes - fixes - stockage - transport - divers - dotations;
+    const resultat = ca - coutVentes - fixes - stockage - transport - divers - dotations - fabrication;
     cumRes += resultat;
     rows.push({
       i, nom: m.nom, tresoDebut, encaissements: enc[i], paiementsAchats: decAch[i], fixes, stockage, transport, divers, pub,
@@ -550,7 +560,7 @@ function productionHtml(c, i) {
   const inp = (j, k, v, extra = "") => `<input type="number" ${extra} data-m="${i}" data-list="production" data-j="${j}" data-k="${k}" value="${esc(v)}">`;
   return `<div class="card">
     <div class="row between"><h2>Production · trieuses (bouchons naturels)</h2><button class="btn ghost" data-add="production">+ Trier un lot de matière</button></div>
-    <p class="muted small">Chaque lot de matière trié donne des semi-finis Q1 à Q4 selon les pourcentages du jeu (Paramètres). Coût d'un lot produit = coût moyen de la matière + ${fmtP(n0(pp.frais))} de frais de fabrication (payés ce mois-ci). Hypothèse : les semi-finis sont vendables le mois même.</p>
+    <p class="muted small">Chaque lot de matière trié donne des semi-finis Q1 à Q4 selon les pourcentages du jeu (Paramètres). Comme dans le jeu : un lot produit est valorisé au coût moyen de la matière, et les ${fmtP(n0(pp.frais))} de frais de fabrication par lot sont une charge du mois (payée ce mois-ci). Hypothèse : les semi-finis sont vendables le mois même.</p>
     <p class="small">Matières en stock ce mois : ${MATIERES.filter((x) => avant[x] > 0).map((x) => `<b>${fmtN(avant[x])}</b> ${esc(x.replace("Bouchons ", ""))}`).join(" · ") || `<span class="muted">aucune — saisissez le stock racheté (285 000 €) comme achat de matières à l'étape B de Mars</span>`}</p>
     ${(m.production || []).length ? `<div class="table-wrap"><table>
       <thead><tr><th>Matière</th><th class="r">Lots triés</th>${QS.map((q) => `<th class="r">→ ${q}</th>`).join("")}<th class="r">Frais</th><th></th></tr></thead>
@@ -945,7 +955,8 @@ function revientMois(c, i, cle = "ca") {
   const r = c.rows[i], m = state.months[i];
   const lignes = ventesDuMois(m).map((v) => {
     const lots = n0(v.lots), prod = normProduit(v.produit);
-    return { produit: prod, segment: SEGMENTS.includes(v.segment) ? v.segment : "Autre", lots, ca: lots * n0(v.prix), prod: lots * (r.cmupP[prod] || 0), direct: n0(v.coutTransport) };
+    // un lot Q porte directement ses frais de tri (matière + tri = coût de production)
+    return { produit: prod, segment: SEGMENTS.includes(v.segment) ? v.segment : "Autre", lots, ca: lots * n0(v.prix), prod: lots * ((r.cmupP[prod] || 0) + (QS.includes(prod) ? n0(state.production.frais) : 0)), direct: n0(v.coutTransport) };
   }).filter((l) => l.lots > 0);
   const ind = {
     "Salaires": r.salaires, "Frais de structure": r.structure, "Frais de stockage": r.stockage, "Dotations aux amortissements": r.dotations,
@@ -989,7 +1000,7 @@ function revientProduits(c, i, cle = "ca") {
     return pm.length ? { v: pm.reduce((a, b) => a + b, 0) / pm.length + n0(pp.frais), src: "prix marché matière + tri" } : { v: NaN, src: "inconnu" };
   })();
   const rows = ["Agglomérés", ...QS].map((p) => {
-    let cu = r.cmupP[p], src = "coût moyen du stock";
+    let cu = r.cmupP[p] > 0 ? r.cmupP[p] + (p === "Agglomérés" ? 0 : n0(pp.frais)) : 0, src = p === "Agglomérés" ? "coût moyen du stock" : "coût moyen du stock + tri";
     if (!(cu > 0)) { if (p === "Agglomérés") { cu = n0(state.params.prixMarche); src = "prix marché"; } else { cu = cuQestim.v; src = cuQestim.src; } }
     let vol = vendus[p] || 0, volSrc = "vendus ce mois";
     if (!vol) { vol = besoinTotal(p, i); volSrc = vol ? "besoins annoncés" : "aucun volume"; }
@@ -1091,7 +1102,7 @@ function renderRevient(c) {
           ${R.parProduit.map((a) => `<tr><td>${esc(a.key)}</td><td class="r">${fmtN(a.lots)}</td><td class="r">${fmtP(R.r.cmupP[a.key])}</td><td class="r">${fmtE(a.prod)}</td></tr>`).join("") || `<tr><td colspan="4" class="muted">Aucune vente</td></tr>`}
           <tr><td><b>Total</b></td><td class="r"><b>${fmtN(g.lots)}</b></td><td></td><td class="r"><b>${fmtE(g.prod)}</b></td></tr>
         </tbody></table>
-        <p class="muted small">Sortie de stock = lots vendus × coût unitaire moyen pondéré (CMUP) du mois.</p>
+        <p class="muted small">Sortie de stock = lots vendus × coût unitaire moyen pondéré (CMUP) du mois, + frais de tri pour les Q1–Q4. Comme dans le jeu, le CMUP intègre les achats dès la commande (lots en transit compris).</p>
       </div>
       <div class="card">
         <h2>2 · Coûts hors production</h2>
