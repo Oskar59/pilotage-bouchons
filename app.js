@@ -2,7 +2,7 @@
 // Tout est stocké dans le navigateur (localStorage). Partage via export JSON ou lien.
 
 // Numéro de version affiché dans l'en-tête : à augmenter à chaque mise à jour du site
-const APP_VERSION = "2.7";
+const APP_VERSION = "2.8";
 const APP_DATE = "25/11/2026";
 const STORE_KEY = "pilotage-bouchons-v1";
 const KEY_KEY = "pilotage-bouchons-apikey";          // clé Claude (navigateur uniquement)
@@ -140,6 +140,7 @@ let state = load();
 let ui = {
   tab: "dashboard", editMonth: state.currentMonth, busy: false,
   rev: { mois: null, cle: "ca", marge: 20 },
+  tri: { matiere: "Bouchons Espagne A", lots: 1000, q: null },
   cloudForm: { url: CLOUD_DEFAULT.url, key: CLOUD_DEFAULT.key, code: "", name: "" }, cloudHist: null,
   simu: { type: "achat", produit: "Agglomérés", segment: "Vignerons", lots: 5000, prix: 21, delai: 1, livraison: 1, transport: "Train", coutTransport: 0, mois: state.currentMonth },
 };
@@ -550,7 +551,49 @@ function productionHtml(c, i) {
         ${QS.map((q, k) => `<td class="r">${fmtN(l * n0(rd[k]) / tot)} <span class="muted small">${n0(rd[k])} %</span></td>`).join("")}
         <td class="r">${fmtE(l * n0(pp.frais))}</td><td><button class="btn danger" data-del="production" data-j="${j}">✕</button></td></tr>`; }).join("")}</tbody>
     </table></div>
-    <p class="small">Produit ce mois : ${QS.map((q) => `<b>${fmtN(r.prodOut[q])}</b> ${q}${r.prodOut[q] ? ` (coût ${fmtP(r.cmupP[q])})` : ""}`).join(" · ")}. Vendez-les dans « Autres ventes » (produit Q1 à Q4, fourchettes de prix dans Paramètres).</p>` : ""}
+    <p class="small">Produit ce mois : ${QS.map((q) => `<b>${fmtN(r.prodOut[q])}</b> ${q}${r.prodOut[q] ? ` (coût ${fmtP(r.cmupP[q])})` : ""}`).join(" · ")}. Vendez-les à l'étape A (tableau Bouchons naturels Q1–Q4).</p>` : ""}
+    ${calcTriHtml(c, i)}
+  </div>`;
+}
+
+// Calculateur de tri : matière + lots → Q1..Q4 ; ou Q voulus → lots de matière nécessaires
+function calcTriHtml(c, i) {
+  const r = c.rows[i], pp = state.production, t = ui.tri;
+  const rdOf = (x) => { const rd = pp.rendements[x] || [25, 25, 25, 25]; const tot = rd.reduce((a, b) => a + n0(b), 0) || 100; return rd.map((v) => n0(v) / tot); };
+  const coutMat = (x) => (r.cmupP[x] > 0 ? { v: r.cmupP[x], src: "stock" } : n0(pp.prixMarche[x]) ? { v: n0(pp.prixMarche[x]), src: "prix marché" } : { v: NaN, src: "" });
+  const y = rdOf(t.matiere), L = Math.max(0, n0(t.lots)), cm = coutMat(t.matiere);
+  const out = y.map((v) => L * v);
+  const q = t.q || QS.map((qq) => besoinTotal(qq, i));
+  const options = MATIERES.filter((x) => n0(pp.prixMarche[x]) || r.dispoP[x] > 0).map((x) => {
+    const yy = rdOf(x); let lots = 0;
+    q.forEach((need, k) => { if (n0(need) > 0) lots = Math.max(lots, yy[k] > 0 ? n0(need) / yy[k] : Infinity); });
+    lots = Math.ceil(lots);
+    const cmx = coutMat(x);
+    const prod = yy.map((v) => lots * v);
+    return { x, lots, prod, surplus: prod.reduce((a, v, k) => a + Math.max(0, v - n0(q[k])), 0), cout: Number.isFinite(lots) ? lots * (cmx.v + n0(pp.frais)) : NaN, enStock: r.dispoP[x] || 0 };
+  });
+  const best = options.filter((o) => Number.isFinite(o.cout) && o.lots > 0).sort((a, b) => a.cout - b.cout)[0];
+  return `<div class="inner-card">
+    <h2>Calculateur de tri</h2>
+    <div class="grid c2">
+      <div>
+        <p class="small"><b>Si je trie…</b></p>
+        <div class="row"><label class="field" style="flex:2">Matière<select data-tri="matiere">${opts(MATIERES.map((x) => [x, x]), t.matiere)}</select></label>
+        <label class="field" style="flex:1">Lots<input type="number" min="0" data-tri="lots" value="${esc(t.lots)}"></label></div>
+        <table class="section-gap"><thead><tr>${QS.map((qq) => `<th class="r">${qq}</th>`).join("")}<th class="r">Frais de tri</th></tr></thead>
+          <tbody><tr>${out.map((v, k) => `<td class="r"><b>${fmtN(v)}</b><br><span class="muted small">${Math.round(y[k] * 100)} %</span></td>`).join("")}<td class="r">${fmtE(L * n0(pp.frais))}</td></tr></tbody></table>
+        <p class="muted small">Coût d'un lot Q : ${Number.isFinite(cm.v) ? `${fmtP(cm.v + n0(pp.frais))} (matière ${fmtP(cm.v)} ${cm.src === "stock" ? "au coût du stock" : "au prix marché"} + ${fmtP(n0(pp.frais))} de tri)` : "prix de la matière inconnu"}. En stock ce mois : ${fmtN(r.dispoP[t.matiere] || 0)} lots${n0(pp.capacite) ? ` · capacité de tri ${fmtN(pp.capacite)} lots/mois` : ""}.</p>
+        <button class="btn ghost" id="triAjouter" data-m="${i}">Ajouter ce tri à ${esc(state.months[i].nom)}</button>
+      </div>
+      <div>
+        <p class="small"><b>Je veux obtenir…</b> <span class="muted">(prérempli avec les besoins annoncés du mois)</span></p>
+        <div class="q-grid" style="grid-template-columns:repeat(4,minmax(0,1fr))">${QS.map((qq, k) => `<label class="field">${qq}<input type="number" min="0" data-tri="q${k}" value="${esc(q[k])}"></label>`).join("")}</div>
+        <table class="section-gap"><thead><tr><th>Matière</th><th class="r">Lots à trier</th><th class="r">Coût (matière + tri)</th><th class="r">En trop</th></tr></thead><tbody>
+          ${options.map((o) => `<tr class="${o === best ? "current" : ""}"><td class="small">${esc(o.x.replace("Bouchons ", ""))}${o === best ? ` <span class="badge good">moins cher</span>` : ""}${o.enStock ? `<br><span class="muted small">${fmtN(o.enStock)} en stock</span>` : ""}</td><td class="r">${Number.isFinite(o.lots) ? fmtN(o.lots) : "—"}</td><td class="r">${fmtE(o.cout)}</td><td class="r muted">${Number.isFinite(o.surplus) ? fmtN(o.surplus) : "—"}</td></tr>`).join("")}
+        </tbody></table>
+        <p class="muted small">La qualité la plus difficile à obtenir décide du nombre de lots ; les autres qualités sortent en plus (« en trop »).</p>
+      </div>
+    </div>
   </div>`;
 }
 
@@ -1619,6 +1662,15 @@ function renderStock(c) {
           <td class="small">${SEGMENTS.map((s) => { const rg = range(s, p); return rg ? `${rg[0]}–${rg[1]} €` : "—"; }).join(" / ")}</td></tr>`).join("")}
       </tbody></table>
     </div>
+    ${c.rows.some((rw) => rw.prodLots) ? `<div class="card">
+      <h2>Production de bouchons naturels (tri)</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Mois</th><th class="r">Lots de matière triés</th>${QS.map((q) => `<th class="r">${q} produits</th>`).join("")}<th class="r">Frais de tri</th>${QS.map((q) => `<th class="r">Stock ${q} fin</th>`).join("")}</tr></thead>
+        <tbody>${c.rows.map((rw) => `<tr class="${rw.i === state.currentMonth ? "current" : ""}"><td>${esc(rw.nom)}</td><td class="r">${fmtN(rw.prodLots)}</td>${QS.map((q) => `<td class="r">${rw.prodOut[q] ? `<b>${fmtN(rw.prodOut[q])}</b>` : "—"}</td>`).join("")}<td class="r">${fmtE(rw.fabrication)}</td>${QS.map((q) => `<td class="r muted">${fmtN(rw.finP[q])}</td>`).join("")}</tr>`).join("")}
+          <tr><td><b>Total</b></td><td class="r"><b>${fmtN(c.rows.reduce((t2, rw) => t2 + rw.prodLots, 0))}</b></td>${QS.map((q) => `<td class="r"><b>${fmtN(c.rows.reduce((t2, rw) => t2 + rw.prodOut[q], 0))}</b></td>`).join("")}<td class="r"><b>${fmtE(c.rows.reduce((t2, rw) => t2 + rw.fabrication, 0))}</b></td>${QS.map(() => "<td></td>").join("")}</tr>
+        </tbody>
+      </table></div>
+    </div>` : ""}
     <div class="card">
       <h2>Mouvements de stock (tous produits, lots)</h2>
       <div class="table-wrap"><table>
@@ -2128,7 +2180,7 @@ document.addEventListener("click", (e) => {
     try { localStorage.setItem(STORE_KEY + "-tab", ui.tab); } catch {}
     return;
   }
-  if (t.dataset.editmonth !== undefined) { ui.editMonth = +t.dataset.editmonth; render(); return; }
+  if (t.dataset.editmonth !== undefined) { ui.editMonth = +t.dataset.editmonth; ui.tri.q = null; render(); return; }
   if (t.dataset.add) {
     const m = state.months[ui.editMonth];
     if (t.dataset.add === "achats") m.achats.push({ id: uid(), fournisseur: "", produit: "Agglomérés", lots: 5000, prix: n0(state.params.prixMarche), livraison: 1, delai: 0, transport: "Train", coutTransport: 0 });
@@ -2175,6 +2227,11 @@ document.addEventListener("click", (e) => {
     }
     case "forgetKey": lsSet(iaProvider() === "claude" ? KEY_KEY : GEM_KEY, ""); render(); break;
     case "sendChat": askAI(document.getElementById("chatInput").value); break;
+    case "triAjouter": {
+      const m = state.months[+t.dataset.m]; m.production = m.production || [];
+      m.production.push({ id: uid(), matiere: ui.tri.matiere, lots: Math.max(0, n0(ui.tri.lots)) });
+      save(); render(); toast(`Tri ajouté : ${fmtN(n0(ui.tri.lots))} lots de ${ui.tri.matiere}`); break;
+    }
     case "addPchg": state.paramChanges.push({ id: uid(), mois: state.currentMonth, cle: "salaires", valeur: n0(state.params.salaires) }); save(); render(); break;
     case "addInv": state.investissements.push({ id: uid(), libelle: "", montant: 0, mois: state.currentMonth, duree: 5 }); save(); render(); break;
     case "figerPrevu": {
@@ -2344,6 +2401,17 @@ document.addEventListener("input", (e) => {
   if (t.dataset.cloudname !== undefined && cloud) { cloud.name = t.value.trim(); try { localStorage.setItem(CLOUD_KEY, JSON.stringify(cloud)); } catch {} return; }
   if (t.dataset.note) { state.months[+t.dataset.m][t.dataset.note] = t.value; save(); return; }
   if (t.id === "rules") { state.rules = t.value; save(); return; }
+  if (t.dataset.tri) {
+    const k = t.dataset.tri;
+    if (k === "matiere") ui.tri.matiere = t.value;
+    else if (k === "lots") ui.tri.lots = n0(t.value);
+    else { const idx = +k.slice(1); ui.tri.q = ui.tri.q || QS.map((qq) => besoinTotal(qq, ui.editMonth)); ui.tri.q[idx] = n0(t.value); }
+    const sel = t.dataset.tri, pos = t.selectionStart;
+    renderMois(compute(state));
+    const f = document.querySelector(`[data-tri="${sel}"]`);
+    if (f) { f.focus(); try { if (pos != null) f.setSelectionRange(pos, pos); } catch {} }
+    return;
+  }
   if (t.dataset.rev) {
     const k = t.dataset.rev;
     ui.rev[k] = k === "cle" ? t.value : n0(t.value);

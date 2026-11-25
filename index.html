@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Pilotage Bouchons</title>
   <meta name="description" content="Suivi de trésorerie, de stock et conseiller stratégique pour le jeu d'entreprise (distributeur de bouchons de liège).">
-  <link rel="stylesheet" href="style.css?v=2.7">
+  <link rel="stylesheet" href="style.css?v=2.8">
 </head>
 <body>
   <header class="topbar">
@@ -166,6 +166,8 @@
           <tr><th>Étape A · Q1–Q4</th><td>Saisie du mois. Même principe que les agglomérés : demande reçue, livré, perdu, CA, marge, par segment et par qualité. Livré est rempli automatiquement si le stock trié suffit. « Répartir automatiquement » sert aussi les Q1–Q4 (segments les mieux payés d'abord).</td></tr>
           <tr><th>Quoi acheter maintenant</th><td>Étape B. Besoins annoncés du mois prochain − stock prévu (pour Q1–Q4 : stock trié + matière disponible une fois triée) = manque. Pour les Q, le site calcule combien de lots d'Espagne A, B ou C acheter pour couvrir toutes les qualités manquantes : <div class="formula">Lots à acheter = max sur Q1..Q4 de (manque de la qualité ÷ % de cette qualité)</div> et le coût (prix moyen annoncé + 2 € de tri). La moins chère est signalée.</td></tr>
           <tr><th>Capacité de tri</th><td>Paramètres → Production. Si vous la renseignez, une alerte apparaît quand un mois trie plus que cette capacité.</td></tr>
+          <tr><th>Calculateur de tri</th><td>Dans la carte Production (Saisie du mois). <b>Si je trie…</b> : choisissez une matière et un nombre de lots → Q1, Q2, Q3, Q4 obtenus, frais de tri et coût d'un lot Q ; « Ajouter ce tri » l'enregistre dans le mois. <b>Je veux obtenir…</b> : saisissez les quantités de Q voulues (préremplies avec les besoins annoncés) → nombre de lots à trier pour chaque matière, coût et lots en trop ; la moins chère est signalée. Le calculateur ne modifie rien tant que vous ne cliquez pas sur « Ajouter ».</td></tr>
+          <tr><th>Production par mois</th><td>Onglet Stock : lots de matière triés, Q1–Q4 produits, frais de tri et stock de chaque qualité en fin de mois, avec le total.</td></tr>
           <tr><th>Prix Q1–Q4 et niveau de publicité</th><td>Planification : chaque segment a des prix Q1–Q4 (comme dans le jeu) et un <b>niveau de publicité</b> ciblé : Aucune, Flyers 10 000 €, E-mailing 20 000 €, Visite de l'usine 50 000 €. Ces coûts, la publicité agglomérés et la publicité bouchons naturels sont comptés dans « Publicité / marketing ». Une vente de Q1–Q4 dans « Autres ventes » reprend le prix planifié du segment.</td></tr>
         </tbody></table>
       </div>
@@ -290,6 +292,6 @@
   <div id="toast" class="toast" hidden></div>
   <section id="report" class="report" aria-hidden="true"></section>
 
-  <script type="module" src="app.js?v=2.7"></script>
+  <script type="module" src="app.js?v=2.8"></script>
 </body>
 </html>
