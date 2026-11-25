@@ -2,7 +2,7 @@
 // Tout est stocké dans le navigateur (localStorage). Partage via export JSON ou lien.
 
 // Numéro de version affiché dans l'en-tête : à augmenter à chaque mise à jour du site
-const APP_VERSION = "2.14";
+const APP_VERSION = "2.15";
 const APP_DATE = "25/11/2026";
 const STORE_KEY = "pilotage-bouchons-v1";
 const KEY_KEY = "pilotage-bouchons-apikey";          // clé Claude (navigateur uniquement)
@@ -134,7 +134,7 @@ function defaultState() {
     params: { capital: 500000, salaires: 40000, structure: 20000, stockageRate: 0.33, prixMarche: 21, seuilTreso: 50000 },
     stockInitial: { lots: 12000, prix: 25, moisPaiement: 0, produit: "Agglomérés" },
     prixClients: structuredClone(DEFAULT_PRIX_CLIENTS),
-    months: MOIS.map(emptyMonth),
+    months: MOIS.slice(0, 8).map(emptyMonth), // le jeu se termine en août
     paramChanges: [],      // [{ id, mois, cle, valeur }] : un paramètre change à partir d'un mois
     investissements: [],   // [{ id, libelle, montant, mois, duree (années) }] : payé comptant, amorti
     production: structuredClone(DEFAULT_PRODUCTION),
