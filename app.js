@@ -2,7 +2,7 @@
 // Tout est stocké dans le navigateur (localStorage). Partage via export JSON ou lien.
 
 // Numéro de version affiché dans l'en-tête : à augmenter à chaque mise à jour du site
-const APP_VERSION = "2.10";
+const APP_VERSION = "2.11";
 const APP_DATE = "25/11/2026";
 const STORE_KEY = "pilotage-bouchons-v1";
 const KEY_KEY = "pilotage-bouchons-apikey";          // clé Claude (navigateur uniquement)
@@ -34,7 +34,7 @@ const DEFAULT_PRODUCTION = {
   },
 };
 // Ciblage marketing par segment (à partir du mois 3) : niveau → coût HT
-const CIBLAGES = [["Aucune", 0], ["Flyers (10 000 €)", 10000], ["E-mailing (20 000 €)", 20000], ["Visite de l'usine (50 000 €)", 50000]];
+const CIBLAGES = [["Aucune", 0], ["Flyers (10 000 €)", 10000], ["E-mailing (20 000 €)", 20000], ["Visite de l'usine (50 000 €)", 50000], ["Démonstrations chez les clients (100 000 €)", 100000]];
 const coutCiblage = (m) => SEGMENTS.reduce((t, sg) => t + (CIBLAGES[n0(m.marketing?.[sg]?.ciblage)]?.[1] || 0), 0);
 // Besoins clients annoncés (guide « Nouvelles activités ») : segment → produit → { index du mois : lots }
 const BESOINS_GUIDE = {
@@ -63,6 +63,11 @@ Annonce du mois de mars (mois 3) :
 - Trieuses : chaque lot de matière (Bouchons Espagne/Portugal/Maroc A/B/C) donne des bouchons semi-finis Q1 à Q4 selon des pourcentages ; frais de fabrication 2 € par unité en entrée.
 - Ciblage marketing : à partir du mois 3, une action marketing ciblée par typologie de client final (viticulteurs, négociants, caves), au choix parmi trois niveaux : Flyers (10 000 € HT), E-mailing (20 000 € HT), Visite de l'usine (50 000 € HT). Ce type de communication a un impact positif.
 - Prix d'achat moyen auprès des industriels : 55 €/lot Bouchons Espagne A, 60 €/lot Espagne B, 65 €/lot Espagne C.`;
+const RULES_AVRIL = `
+Annonce du mois d'avril (mois 4) :
+- Contrats commerciaux : des accords de long terme naissent entre industriels et distributeurs (accord sur le volume, sur la fidélité…). Un contrat signé est nécessaire (l'oral ne suffit pas) et il doit prévoir des pénalités en cas de non-respect, sinon il est caduc.
+- Nouveau niveau de communication dès le mois 4 : démonstrations des produits directement chez les clients (transport + matériel spécifique, mobilise les commerciaux). C'est le 4e niveau de communication ciblée : 100 000 € par segment.
+- Ce mois-ci, nous avons obtenu 10 % de remise sur nos commandes (à récupérer sur les factures).`;
 const SEGMENTS = ["Vignerons", "Caves", "Négociants"];
 const SEG_LABEL = { Vignerons: "Vignerons", Caves: "Caves", "Négociants": "Négociants / Grands comptes" };
 const DELAIS = ["Comptant", "30 jours", "60 jours"];
@@ -215,6 +220,7 @@ function migrate(s) {
   out.production = { frais: s.production?.frais ?? DEFAULT_PRODUCTION.frais, prixMarche: { ...DEFAULT_PRODUCTION.prixMarche, ...(s.production?.prixMarche || {}) }, rendements: { ...structuredClone(DEFAULT_PRODUCTION.rendements), ...(s.production?.rendements || {}) } };
   if (out.rules && !out.rules.includes("liquidation judiciaire")) out.rules += "\n" + RULES_MARS;
   if (out.rules && !out.rules.includes("Nouvelles activités")) out.rules += "\n" + RULES_GUIDE;
+  if (out.rules && !out.rules.includes("Annonce du mois d'avril")) out.rules += "\n" + RULES_AVRIL;
   if (!s.besoins) out.besoins = DEFAULT_BESOINS();
   out.months.forEach((m) => { m.livraisonsQ = m.livraisonsQ || {}; });
   // Caves Q4 : le simulateur (Informations Clients) affiche 85–110 €, c'est lui qui fait foi.
@@ -845,7 +851,7 @@ Ce qui a changé depuis le début du jeu (à bien prendre en compte) :
 - Depuis Mars : notre fournisseur historique allemand STECKER est en liquidation judiciaire, il ne fait plus d'offres. Il faut négocier avec les fournisseurs français et les autres distributeurs.
 - Nous avons racheté ses trieuses (30 000 € comptant, amorties sur 5 ans) et son stock de bouchons naturels (285 000 € payés en Mars). Nouvelle activité : acheter des bouchons naturels tubés (Espagne A, B, C), les TRIER (2 € par lot ; chaque matière donne des qualités Q1 à Q4 selon des pourcentages fixes), puis les vendre aux clients ou à d'autres distributeurs.
 - Les salaires sont passés de 40 000 € à 150 000 € par mois à partir de Mars : nos charges fixes sont beaucoup plus lourdes.
-- En planification, chaque segment a maintenant des prix pour Q1, Q2, Q3, Q4 et Agglomérés, un délai de paiement, et un « niveau de publicité » ciblé (Aucune, Flyers 10 000 €, E-mailing 20 000 €, Visite de l'usine 50 000 €). Il y a deux budgets pub : bouchons naturels et agglomérés.
+- En planification, chaque segment a maintenant des prix pour Q1, Q2, Q3, Q4 et Agglomérés, un délai de paiement, et un « niveau de publicité » ciblé (Aucune, Flyers 10 000 €, E-mailing 20 000 €, Visite de l'usine 50 000 €, et depuis Avril Démonstrations chez les clients 100 000 €). Il y a deux budgets pub : bouchons naturels et agglomérés.
 - Les besoins clients et les fourchettes de prix par produit sont annoncés dans le PDF. Nous ne sommes pas obligés de servir tous les clients.
 
 Règles importantes : un achat chez un industriel arrive le mois suivant (M+1) mais il est facturé à la commande ; un achat à un distributeur est instantané ; un prix hors fourchette est ramené au minimum ou au maximum ; la demande non servie part chez les concurrents ; stockage = 0,33 % de la valeur du stock de fin de mois ; la trésorerie ne doit JAMAIS être négative.
