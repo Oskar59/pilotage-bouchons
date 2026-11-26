@@ -2,7 +2,7 @@
 // Tout est stocké dans le navigateur (localStorage). Partage via export JSON ou lien.
 
 // Numéro de version affiché dans l'en-tête : à augmenter à chaque mise à jour du site
-const APP_VERSION = "2.17";
+const APP_VERSION = "2.18";
 const APP_DATE = "25/11/2026";
 const STORE_KEY = "pilotage-bouchons-v1";
 const KEY_KEY = "pilotage-bouchons-apikey";          // clé Claude (navigateur uniquement)
@@ -71,8 +71,8 @@ Annonce du mois d'avril (mois 4) :
 const SEGMENTS = ["Vignerons", "Caves", "Négociants"];
 const SEG_LABEL = { Vignerons: "Vignerons", Caves: "Caves", "Négociants": "Négociants / Grands comptes" };
 const DELAIS = ["Comptant", "30 jours", "60 jours"];
-// Achats, libellés du jeu : à la commande (mois M), 30 jours = à la livraison (M+1), 60 jours = 30 j après la livraison (M+2)
-const DELAIS_ACHAT = ["À la commande", "30 jours (à la livraison)", "60 jours (30 j après la livraison)"];
+// Achats, libellés du jeu : à la commande (M), à la livraison (M+1), 30 j après la livraison (M+2), 60 j après la livraison (M+3)
+const DELAIS_ACHAT = ["À la commande", "À la livraison (mois suivant)", "30 j après la livraison (2 mois après)", "60 j après la livraison (3 mois après)"];
 const delaiAchat = (k) => DELAIS_ACHAT[n0(k)] || `${n0(k)} mois`;
 const STATUTS = [["Validée (comptée)", "validee"], ["En négociation", "nego"], ["Refusée / annulée", "refusee"]];
 const LIVRAISONS = [["Instantané (distributeur)", 0], ["30 jours (industriel)", 1], ["60 jours", 2]];
@@ -213,7 +213,7 @@ function migrate(s) {
     ...emptyMonth(m.nom), ...m,
     marketing: { ...emptyMarketing(), ...(m.marketing || {}) },
     livraisons: { ...emptyLivraisons(), ...(m.livraisons || {}) },
-    achats: (m.achats || []).map((a) => ({ livraison: 1, statut: "validee", ...a, produit: normProduit(a.produit), delai: Math.min(2, n0(a.delai)) })),
+    achats: (m.achats || []).map((a) => ({ livraison: 1, statut: "validee", ...a, produit: normProduit(a.produit), delai: Math.min(3, n0(a.delai)) })),
     ventes: (m.ventes || []).map((v) => ({ segment: SEGMENTS.includes(v.segment) ? v.segment : "Vignerons", ...v, produit: normProduit(v.produit), delai: Math.min(2, n0(v.delai)) })),
   }));
   out.months.forEach((m) => SEGMENTS.forEach((sg) => { m.marketing[sg].delai = Math.min(2, n0(m.marketing[sg].delai)); }));

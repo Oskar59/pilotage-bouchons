@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Pilotage Bouchons</title>
   <meta name="description" content="Suivi de trésorerie, de stock et conseiller stratégique pour le jeu d'entreprise (distributeur de bouchons de liège).">
-  <link rel="stylesheet" href="style.css?v=2.17">
+  <link rel="stylesheet" href="style.css?v=2.18">
 </head>
 <body>
   <header class="topbar">
@@ -75,7 +75,7 @@
           <li><b>Trésorerie de départ</b> (début janvier) = capital de départ (500 000 €).</li>
           <li><b>Encaissements du mois</b> = toutes les ventes dont <i>mois de vente + délai de paiement client</i> tombe ce mois-ci. Comptant = même mois, 30 jours = mois suivant, 60 jours = deux mois après.</li>
           <li><b>Décaissements du mois</b> = salaires + frais de structure + frais de stockage + publicité + coûts de transport + autres dépenses + <b>paiements fournisseurs exigibles</b>.</li>
-          <li><b>Paiements fournisseurs exigibles</b> = achats <b>validés</b> dont <i>mois d'achat + délai de paiement</i> tombe ce mois-ci (comme dans le jeu : « à la commande » = le mois même, « 30 jours » = à la livraison, le mois suivant, « 60 jours » = 30 jours après la livraison, 2 mois après la commande), plus le stock de départ (12 000 × 25 € = 300 000 €) payé fin janvier.</li>
+          <li><b>Paiements fournisseurs exigibles</b> = achats <b>validés</b> dont <i>mois d'achat + délai de paiement</i> tombe ce mois-ci (comme dans le jeu : « à la commande » = le mois même, « à la livraison » = le mois suivant, « 30 j après la livraison » = 2 mois après la commande, « 60 j après la livraison » = 3 mois après), plus le stock de départ (12 000 × 25 € = 300 000 €) payé fin janvier.</li>
         </ul>
         <h3>Stock</h3>
         <div class="formula">Stock fin = Stock début + Lots reçus − Lots vendus</div>
@@ -293,6 +293,6 @@
   <div id="toast" class="toast" hidden></div>
   <section id="report" class="report" aria-hidden="true"></section>
 
-  <script type="module" src="app.js?v=2.17"></script>
+  <script type="module" src="app.js?v=2.18"></script>
 </body>
 </html>
